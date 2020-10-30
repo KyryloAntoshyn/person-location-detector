@@ -6,6 +6,7 @@
     </qresource>
     <qresource prefix="/icons">
         <file alias="person-detection">icons/person_detection.png</file>
+        <file alias="hamburger">icons/hamburger.png</file>
         <file alias="camera">icons/camera.png</file>
         <file alias="neural-network">icons/neural_network.png</file>
         <file alias="settings">icons/settings.png</file>

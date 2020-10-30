@@ -10,22 +10,18 @@ from views.about_widget import AboutWidget
 STYLE_SHEET = """
 
 QListWidget {
-    background: #E5E5E5;
+    background-color: #E5E5E5;
     outline: 0px;
 }
 
-QListWidget::item:selected {
-    background: #C5C5C5;
-    border-left: 2px solid #0078D7;
-    color: black;
+QListWidget::item:selected:active, QListWidget::item:selected:!active {
+    background-color: #C5C5C5;
+    color: #193852;
 }
 
 QListWidget::item:hover {
-    background: #D5D5D5;
+    background-color: #D5D5D5;
 }
-
-
-
 """
 
 
@@ -82,6 +78,8 @@ class MainWindow(QMainWindow):
             self.list_widget_menu.addItem(item)
 
             self.stacked_widget_pages.addWidget(widget)
+
+        self.list_widget_menu.setCurrentRow(0)
 
         self.horizontal_layout_menu_and_pages.addWidget(self.list_widget_menu)
 
