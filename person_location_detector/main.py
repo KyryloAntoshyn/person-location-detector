@@ -34,5 +34,12 @@ class ApplicationInitializer:
         self.application.setFont(QFont("Roboto Light", 14))
 
 
-if __name__ == "__main__":
+def main():
+    """
+    Application entry point.
+    """
     ApplicationInitializer().initialize_and_start_application()
+
+
+if __name__ == "__main__":
+    main()
