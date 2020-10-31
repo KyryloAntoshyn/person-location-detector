@@ -129,7 +129,7 @@ class MainWindow(QMainWindow):
             self.SIDE_MENU_DEFAULT_WIDTH, self.SIDE_MENU_TOGGLED_WIDTH) if is_checked else (
             self.SIDE_MENU_TOGGLED_WIDTH, self.SIDE_MENU_DEFAULT_WIDTH)
 
-        self.animation.setDuration(400)
+        self.animation.setDuration(300)
         self.animation.setStartValue(animation_start_value)
         self.animation.setEndValue(animation_end_value)
         self.animation.setEasingCurve(QEasingCurve.InOutQuart)

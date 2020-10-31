@@ -1,8 +1,8 @@
 <!DOCTYPE RCC>
 <RCC version="1.0">
     <qresource prefix="/fonts">
-        <file alias="roboto_light">fonts/Roboto-Light.ttf</file>
-        <file alias="roboto_regular">fonts/Roboto-Regular.ttf</file>
+        <file alias="roboto_light">fonts/roboto_light.ttf</file>
+        <file alias="roboto_regular">fonts/roboto_regular.ttf</file>
     </qresource>
     <qresource prefix="/icons">
         <file alias="person_detection">icons/person_detection.png</file>
