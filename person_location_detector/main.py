@@ -6,9 +6,9 @@ from views.main_window import MainWindow
 
 
 def set_app_resources(application):
-    from resources import app_resources
-    QFontDatabase.addApplicationFont(':/fonts/roboto-light')
-    QFontDatabase.addApplicationFont(':/fonts/roboto-regular')
+    from resources import application_resources
+    QFontDatabase.addApplicationFont(':/fonts/roboto_light')
+    QFontDatabase.addApplicationFont(':/fonts/roboto_regular')
     font = QFont("Roboto Light", 14)
     application.setFont(font)
 
