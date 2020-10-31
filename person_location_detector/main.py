@@ -2,34 +2,37 @@ import sys
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtGui import QFontDatabase, QFont
 from views.main_window import MainWindow
+from resources import application_resources
 
 
-def initialize_application_resources_and_styles(application):
+class ApplicationInitializer:
     """
-    Initializes application resources and styles (fonts, etc.).
-
-    :param application: application object
+    Class that is responsible for application initialization.
     """
-    from resources import application_resources
-    QFontDatabase.addApplicationFont(":/fonts/roboto_light")
-    QFontDatabase.addApplicationFont(":/fonts/roboto_regular")
-    application.setFont(QFont("Roboto Light", 14))
 
+    def __init__(self):
+        """
+        Creates application and main window.
+        """
+        self.application = QApplication(sys.argv)
+        self.main_window = MainWindow()
 
-def main():
-    """
-    Initializes application and its resources. Creates and shows main window. Starts application event loop.
+    def initialize_and_start_application(self):
+        """
+        Initializes application styles, shows main window and starts application event loop.
+        """
+        self.__initialize_application_styles()
+        self.main_window.show()
+        sys.exit(self.application.exec_())
 
-    :return: None
-    """
-    application = QApplication(sys.argv)
-    initialize_application_resources_and_styles(application)
-
-    main_window = MainWindow()
-    main_window.show()
-
-    sys.exit(application.exec_())
+    def __initialize_application_styles(self):
+        """
+        Initializes application styles (fonts, etc.).
+        """
+        QFontDatabase.addApplicationFont(":/fonts/roboto_light")
+        QFontDatabase.addApplicationFont(":/fonts/roboto_regular")
+        self.application.setFont(QFont("Roboto Light", 14))
 
 
 if __name__ == "__main__":
-    main()
+    ApplicationInitializer().initialize_and_start_application()
