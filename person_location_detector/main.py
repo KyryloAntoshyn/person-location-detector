@@ -1,6 +1,5 @@
 import sys
-from PyQt5.QtWidgets import QApplication
-from PyQt5.QtGui import QFontDatabase, QFont
+from PyQt5 import QtWidgets, QtGui
 from views.main_window import MainWindow
 from resources import application_resources
 
@@ -14,7 +13,7 @@ class ApplicationInitializer:
         """
         Creates application and main window.
         """
-        self.application = QApplication(sys.argv)
+        self.application = QtWidgets.QApplication(sys.argv)
         self.main_window = MainWindow()
 
     def initialize_and_start_application(self):
@@ -29,9 +28,9 @@ class ApplicationInitializer:
         """
         Initializes application styles (fonts, etc.).
         """
-        QFontDatabase.addApplicationFont(":/fonts/roboto_light")
-        QFontDatabase.addApplicationFont(":/fonts/roboto_regular")
-        self.application.setFont(QFont("Roboto Light", 14))
+        QtGui.QFontDatabase.addApplicationFont(":/fonts/roboto_light")
+        QtGui.QFontDatabase.addApplicationFont(":/fonts/roboto_regular")
+        self.application.setFont(QtGui.QFont("Roboto Light", 14))
 
 
 def main():
