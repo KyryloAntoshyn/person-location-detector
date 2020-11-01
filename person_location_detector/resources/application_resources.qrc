@@ -1,0 +1,15 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/fonts">
+        <file alias="roboto_light">fonts/roboto_light.ttf</file>
+        <file alias="roboto_regular">fonts/roboto_regular.ttf</file>
+    </qresource>
+    <qresource prefix="/icons">
+        <file alias="person_detection">icons/person_detection.png</file>
+        <file alias="menu">icons/menu.png</file>
+        <file alias="camera">icons/camera.png</file>
+        <file alias="neural_network">icons/neural_network.png</file>
+        <file alias="settings">icons/settings.png</file>
+        <file alias="information">icons/information.png</file>
+    </qresource>
+</RCC>

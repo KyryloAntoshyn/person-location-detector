@@ -1,16 +1,45 @@
-# This is a sample Python script.
-
-# Press Shift+F10 to execute it or replace it with your code.
-# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
-
-
-def print_hi(name):
-    # Use a breakpoint in the code line below to debug your script.
-    print(f'Hi, {name}')  # Press Ctrl+F8 to toggle the breakpoint.
+import sys
+from PyQt5.QtWidgets import QApplication
+from PyQt5.QtGui import QFontDatabase, QFont
+from views.main_window import MainWindow
+from resources import application_resources
 
 
-# Press the green button in the gutter to run the script.
-if __name__ == '__main__':
-    print_hi('PyCharm')
+class ApplicationInitializer:
+    """
+    Class that is responsible for application initialization.
+    """
 
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+    def __init__(self):
+        """
+        Creates application and main window.
+        """
+        self.application = QApplication(sys.argv)
+        self.main_window = MainWindow()
+
+    def initialize_and_start_application(self):
+        """
+        Initializes application styles, shows main window and starts application event loop.
+        """
+        self.__initialize_application_styles()
+        self.main_window.show()
+        sys.exit(self.application.exec_())
+
+    def __initialize_application_styles(self):
+        """
+        Initializes application styles (fonts, etc.).
+        """
+        QFontDatabase.addApplicationFont(":/fonts/roboto_light")
+        QFontDatabase.addApplicationFont(":/fonts/roboto_regular")
+        self.application.setFont(QFont("Roboto Light", 14))
+
+
+def main():
+    """
+    Application entry point.
+    """
+    ApplicationInitializer().initialize_and_start_application()
+
+
+if __name__ == "__main__":
+    main()
