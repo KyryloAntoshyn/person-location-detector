@@ -27,7 +27,7 @@ class MainWindow(QMainWindow):
         self.menu_widget_layout = QVBoxLayout(self.menu_widget)
         self.menu_push_button = QPushButton(self.menu_widget)
         self.menu_list_widget = QListWidget(self.menu_widget)
-        self.menu_property_animation = QPropertyAnimation(self.menu_widget, b"maximumWidth", self.central_widget)
+        self.menu_property_animation = QPropertyAnimation(self.menu_widget, b"maximumWidth", self.menu_widget)
         self.widgets_stacked_widget = QStackedWidget(self.central_widget)
 
         self.__initialize_window()
@@ -85,7 +85,7 @@ class MainWindow(QMainWindow):
         self.menu_push_button.setIcon(QIcon(":/icons/menu"))
         self.menu_push_button.setIconSize(QSize(26, 26))
         self.menu_push_button.setCheckable(True)
-        self.menu_push_button.toggled.connect(self.__menu_push_button_toggled)
+        self.menu_push_button.toggled.connect(self.__menu_push_button_on_toggled)
         self.menu_widget_layout.addWidget(self.menu_push_button)
 
         self.menu_list_widget.setStyleSheet("""
@@ -118,7 +118,7 @@ class MainWindow(QMainWindow):
         self.menu_list_widget.currentRowChanged.connect(self.widgets_stacked_widget.setCurrentIndex)
         self.menu_widget_layout.addWidget(self.menu_list_widget)
 
-    def __menu_push_button_toggled(self, is_checked):
+    def __menu_push_button_on_toggled(self, is_checked):
         """
         Starts expanding or collapsing menu widget animation.
 
