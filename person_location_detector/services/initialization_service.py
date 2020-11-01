@@ -4,7 +4,7 @@ from views.main_window import MainWindow
 from resources import application_resources
 
 
-class ApplicationInitializer:
+class InitializationService:
     """
     Class that is responsible for application initialization.
     """
@@ -31,14 +31,3 @@ class ApplicationInitializer:
         QtGui.QFontDatabase.addApplicationFont(":/fonts/roboto_light")
         QtGui.QFontDatabase.addApplicationFont(":/fonts/roboto_regular")
         self.application.setFont(QtGui.QFont("Roboto Light", 14))
-
-
-def main():
-    """
-    Application entry point.
-    """
-    ApplicationInitializer().initialize_and_start_application()
-
-
-if __name__ == "__main__":
-    main()
