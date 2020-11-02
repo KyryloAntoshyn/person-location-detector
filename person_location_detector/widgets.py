@@ -1,8 +1,8 @@
 from PyQt5 import QtWidgets, QtCore, QtGui
-from views.detection_widget import DetectionWidget
-from views.detection_models_widget import DetectionModelsWidget
-from views.settings_widget import SettingsWidget
-from views.about_widget import AboutWidget
+
+from dependency_injector.wiring import Provide
+from dependency_injection import DependencyInjectionContainer
+import services
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -135,3 +135,42 @@ class MainWindow(QtWidgets.QMainWindow):
         Adds widgets stacked widget to the central widget layout.
         """
         self.central_widget_layout.addWidget(self.widgets_stacked_widget)
+
+
+class DetectionWidget(QtWidgets.QWidget):
+    def __init__(self):
+        super(DetectionWidget, self).__init__()
+        self.init_ui()
+
+    def init_ui(self):
+        lbl = QtWidgets.QLabel("Detection widget", self)
+
+
+class DetectionModelsWidget(QtWidgets.QWidget):
+    def __init__(self):
+        super(DetectionModelsWidget, self).__init__()
+        self.init_ui()
+
+    def init_ui(self):
+        lbl = QtWidgets.QLabel("Detection models widget", self)
+
+
+class SettingsWidget(QtWidgets.QWidget):
+    def __init__(self,
+                 service: services.SettingsService = Provide[DependencyInjectionContainer.settings_service_provider]):
+        super(SettingsWidget, self).__init__()
+        self.init_ui()
+
+        service.hello()
+
+    def init_ui(self):
+        lbl = QtWidgets.QLabel("Settings widget", self)
+
+
+class AboutWidget(QtWidgets.QWidget):
+    def __init__(self):
+        super(AboutWidget, self).__init__()
+        self.init_ui()
+
+    def init_ui(self):
+        lbl = QtWidgets.QLabel("About widget", self)
