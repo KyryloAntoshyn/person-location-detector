@@ -1,14 +1,10 @@
-from PyQt5.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QListWidget, QStackedWidget, \
-    QDesktopWidget, QListWidgetItem
-from PyQt5.QtCore import QPropertyAnimation, Qt, QSize, QEasingCurve
-from PyQt5.QtGui import QIcon, QFont
-from views.detection_widget import DetectionWidget
-from views.detection_models_widget import DetectionModelsWidget
-from views.settings_widget import SettingsWidget
-from views.about_widget import AboutWidget
+import services
+from dependency_injector.wiring import Provide
+from dependency_injection import DependencyInjectionContainer
+from PyQt5 import QtWidgets, QtCore, QtGui
 
 
-class MainWindow(QMainWindow):
+class MainWindow(QtWidgets.QMainWindow):
     """
     Main application window class.
     """
@@ -21,14 +17,14 @@ class MainWindow(QMainWindow):
         """
         super(MainWindow, self).__init__()
 
-        self.central_widget = QWidget(self)
-        self.central_widget_layout = QHBoxLayout(self.central_widget)
-        self.menu_widget = QWidget(self.central_widget)
-        self.menu_widget_layout = QVBoxLayout(self.menu_widget)
-        self.menu_push_button = QPushButton(self.menu_widget)
-        self.menu_list_widget = QListWidget(self.menu_widget)
-        self.menu_property_animation = QPropertyAnimation(self.menu_widget, b"maximumWidth", self.menu_widget)
-        self.widgets_stacked_widget = QStackedWidget(self.central_widget)
+        self.central_widget = QtWidgets.QWidget(self)
+        self.central_widget_layout = QtWidgets.QHBoxLayout(self.central_widget)
+        self.menu_widget = QtWidgets.QWidget(self.central_widget)
+        self.menu_widget_layout = QtWidgets.QVBoxLayout(self.menu_widget)
+        self.menu_push_button = QtWidgets.QPushButton(self.menu_widget)
+        self.menu_list_widget = QtWidgets.QListWidget(self.menu_widget)
+        self.menu_property_animation = QtCore.QPropertyAnimation(self.menu_widget, b"maximumWidth", self.menu_widget)
+        self.widgets_stacked_widget = QtWidgets.QStackedWidget(self.central_widget)
 
         self.__initialize_window()
         self.__initialize_central_widget()
@@ -40,12 +36,12 @@ class MainWindow(QMainWindow):
         Sets window parameters and centers it.
         """
         self.setMinimumSize(1280, 720)
-        self.setWindowState(Qt.WindowMaximized)
-        self.setWindowIcon(QIcon(":/icons/person_detection"))
+        self.setWindowState(QtCore.Qt.WindowMaximized)
+        self.setWindowIcon(QtGui.QIcon(":/icons/person_detection"))
         self.setWindowTitle("Person Location Detector")
 
         frame_geometry = self.frameGeometry()
-        frame_geometry.moveCenter(QDesktopWidget().availableGeometry().center())
+        frame_geometry.moveCenter(QtWidgets.QDesktopWidget().availableGeometry().center())
         self.move(frame_geometry.topLeft())
 
     def __initialize_central_widget(self):
@@ -82,8 +78,8 @@ class MainWindow(QMainWindow):
             }""")
         self.menu_push_button.setFixedWidth(38)
         self.menu_push_button.setFixedHeight(38)
-        self.menu_push_button.setIcon(QIcon(":/icons/menu"))
-        self.menu_push_button.setIconSize(QSize(26, 26))
+        self.menu_push_button.setIcon(QtGui.QIcon(":/icons/menu"))
+        self.menu_push_button.setIconSize(QtCore.QSize(26, 26))
         self.menu_push_button.setCheckable(True)
         self.menu_push_button.toggled.connect(self.__menu_push_button_on_toggled)
         self.menu_widget_layout.addWidget(self.menu_push_button)
@@ -99,19 +95,19 @@ class MainWindow(QMainWindow):
             QListWidget::item:hover {
                 background-color: #D5D5D5;
             }""")
-        self.menu_list_widget.setFrameShape(QListWidget.NoFrame)
-        self.menu_list_widget.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.menu_list_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.menu_list_widget.setIconSize(QSize(32, 32))
-        self.menu_list_widget.setFont(QFont("Roboto", 14))
+        self.menu_list_widget.setFrameShape(QtWidgets.QListWidget.NoFrame)
+        self.menu_list_widget.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.menu_list_widget.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.menu_list_widget.setIconSize(QtCore.QSize(32, 32))
+        self.menu_list_widget.setFont(QtGui.QFont("Roboto", 14))
 
         menu_items = [(":/icons/camera", "Detection", DetectionWidget()),
                       (":/icons/neural_network", "Detection models", DetectionModelsWidget()),
                       (":/icons/settings", "Settings", SettingsWidget()),
                       (":/icons/information", "About", AboutWidget())]
         for menu_item_icon, menu_item_name, menu_item_widget in menu_items:
-            menu_item = QListWidgetItem(QIcon(menu_item_icon), menu_item_name, self.menu_list_widget)
-            menu_item.setSizeHint(QSize(16777215, 45))
+            menu_item = QtWidgets.QListWidgetItem(QtGui.QIcon(menu_item_icon), menu_item_name, self.menu_list_widget)
+            menu_item.setSizeHint(QtCore.QSize(16777215, 45))
             self.widgets_stacked_widget.addWidget(menu_item_widget)
 
         self.menu_list_widget.setCurrentRow(0)
@@ -130,7 +126,7 @@ class MainWindow(QMainWindow):
         self.menu_property_animation.setDuration(300)
         self.menu_property_animation.setStartValue(animation_start_value)
         self.menu_property_animation.setEndValue(animation_end_value)
-        self.menu_property_animation.setEasingCurve(QEasingCurve.InOutQuart)
+        self.menu_property_animation.setEasingCurve(QtCore.QEasingCurve.InOutQuart)
         self.menu_property_animation.start()
 
     def __initialize_widgets_stacked_widget(self):
@@ -138,3 +134,42 @@ class MainWindow(QMainWindow):
         Adds widgets stacked widget to the central widget layout.
         """
         self.central_widget_layout.addWidget(self.widgets_stacked_widget)
+
+
+class DetectionWidget(QtWidgets.QWidget):
+    def __init__(self):
+        super(DetectionWidget, self).__init__()
+        self.init_ui()
+
+    def init_ui(self):
+        lbl = QtWidgets.QLabel("Detection widget", self)
+
+
+class DetectionModelsWidget(QtWidgets.QWidget):
+    def __init__(self):
+        super(DetectionModelsWidget, self).__init__()
+        self.init_ui()
+
+    def init_ui(self):
+        lbl = QtWidgets.QLabel("Detection models widget", self)
+
+
+class SettingsWidget(QtWidgets.QWidget):
+    def __init__(self,
+                 service: services.SettingsService = Provide[DependencyInjectionContainer.settings_service_provider]):
+        super(SettingsWidget, self).__init__()
+        self.init_ui()
+
+        service.hello()
+
+    def init_ui(self):
+        lbl = QtWidgets.QLabel("Settings widget", self)
+
+
+class AboutWidget(QtWidgets.QWidget):
+    def __init__(self):
+        super(AboutWidget, self).__init__()
+        self.init_ui()
+
+    def init_ui(self):
+        lbl = QtWidgets.QLabel("About widget", self)
