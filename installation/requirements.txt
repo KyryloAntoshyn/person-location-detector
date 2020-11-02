@@ -1,2 +1,1 @@
-PyQt5==5.15.1
 dependency-injector==4.3.2
