@@ -1,8 +1,7 @@
-from PyQt5 import QtWidgets, QtCore, QtGui
-
+import services
 from dependency_injector.wiring import Provide
 from dependency_injection import DependencyInjectionContainer
-import services
+from PyQt5 import QtWidgets, QtCore, QtGui
 
 
 class MainWindow(QtWidgets.QMainWindow):

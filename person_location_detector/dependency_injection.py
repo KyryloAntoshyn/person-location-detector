@@ -1,5 +1,5 @@
-from dependency_injector import containers, providers
 import services
+from dependency_injector import containers, providers
 
 
 class DependencyInjectionContainer(containers.DeclarativeContainer):
