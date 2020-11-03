@@ -2,6 +2,8 @@ import services
 from dependency_injector.wiring import Provide
 from dependency_injection import DependencyInjectionContainer
 from PyQt5 import QtWidgets, QtCore, QtGui
+import numpy as np
+import cv2 as cv
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -136,13 +138,61 @@ class MainWindow(QtWidgets.QMainWindow):
         self.central_widget_layout.addWidget(self.widgets_stacked_widget)
 
 
+class VideoThread(QtCore.QThread):
+    change_pixmap_signal = QtCore.pyqtSignal(np.ndarray)
+
+    def __init__(self):
+        super(VideoThread, self).__init__()
+        self._run_flag = True
+
+    def run(self):
+        cap = cv.VideoCapture(0)
+        while self._run_flag:
+            ret, cv_img = cap.read()
+            if ret:
+                self.change_pixmap_signal.emit(cv_img)
+        cap.release()
+
+    def stop(self):
+        """Sets run flag to False and waits for thread to finish"""
+        self._run_flag = False
+        self.wait()
+
+
 class DetectionWidget(QtWidgets.QWidget):
     def __init__(self):
         super(DetectionWidget, self).__init__()
-        self.init_ui()
 
-    def init_ui(self):
-        lbl = QtWidgets.QLabel("Detection widget", self)
+        self.detection_widget_layout = QtWidgets.QGridLayout(self)
+        self.detection_widget_layout.setColumnStretch(0, 7)
+        self.detection_widget_layout.setColumnStretch(1, 3)
+
+        self.detected_persons_label = QtWidgets.QLabel(self)
+        self.detection_widget_layout.addWidget(self.detected_persons_label, 0, 0, 2, 1)
+
+        self.detection_settings_layout = QtWidgets.QVBoxLayout(self)
+        self.detection_widget_layout.addLayout(self.detection_settings_layout, 0, 1, 2, 1)
+        self.detection_settings_layout.addWidget(QtWidgets.QLabel("Detection settings"))
+
+        self.video_thread = VideoThread()
+        self.video_thread.change_pixmap_signal.connect(self.update_image)
+        self.video_thread.start()
+
+    @QtCore.pyqtSlot(np.ndarray)
+    def update_image(self, cv_img):
+        qt_img = self.convert_cv_qt(cv_img)
+        self.detected_persons_label.setPixmap(qt_img)
+
+    def convert_cv_qt(self, cv_img):
+        """Convert from an opencv image to QPixmap"""
+        rgb_image = cv.cvtColor(cv_img, cv.COLOR_BGR2RGB)
+        h, w, ch = rgb_image.shape
+        bytes_per_line = ch * w
+        convert_to_Qt_format = QtGui.QImage(rgb_image.data, w, h, bytes_per_line, QtGui.QImage.Format_RGB888)
+        # p = convert_to_Qt_format.scaled(self.display_width, self.display_height, QtCore.Qt.KeepAspectRatio)
+        p = convert_to_Qt_format.scaled(self.detected_persons_label.width(), self.detected_persons_label.height(),
+                                        QtCore.Qt.KeepAspectRatio)
+        return QtGui.QPixmap.fromImage(p)
 
 
 class DetectionModelsWidget(QtWidgets.QWidget):
