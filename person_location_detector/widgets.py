@@ -4,6 +4,8 @@ from dependency_injection import DependencyInjectionContainer
 from PyQt5 import QtWidgets, QtCore, QtGui
 import numpy as np
 import cv2 as cv
+import os
+import time
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -138,50 +140,79 @@ class MainWindow(QtWidgets.QMainWindow):
         self.central_widget_layout.addWidget(self.widgets_stacked_widget)
 
 
-class VideoThread(QtCore.QThread):
-    change_pixmap_signal = QtCore.pyqtSignal(np.ndarray)
-
-    def __init__(self):
-        super(VideoThread, self).__init__()
-        self._run_flag = True
-
-    def run(self):
-        cap = cv.VideoCapture(0)
-        while self._run_flag:
-            ret, cv_img = cap.read()
-            if ret:
-                self.change_pixmap_signal.emit(cv_img)
-        cap.release()
-
-    def stop(self):
-        """Sets run flag to False and waits for thread to finish"""
-        self._run_flag = False
-        self.wait()
-
-
 class DetectionWidget(QtWidgets.QWidget):
-    def __init__(self):
+    def __init__(self,
+                 camera_service: services.CameraService = Provide[DependencyInjectionContainer.camera_service_provider],
+                 detection_service: services.DetectionService = Provide[
+                     DependencyInjectionContainer.detection_service_provider]):
         super(DetectionWidget, self).__init__()
 
         self.detection_widget_layout = QtWidgets.QGridLayout(self)
-        self.detection_widget_layout.setColumnStretch(0, 7)
-        self.detection_widget_layout.setColumnStretch(1, 3)
+        self.detection_widget_layout.setColumnStretch(0, 6)
+        self.detection_widget_layout.setColumnStretch(1, 4)
 
-        self.detected_persons_label = QtWidgets.QLabel(self)
+        self.detected_persons_label = QtWidgets.QLabel("Camera is initializing...", self)
+        self.detected_persons_label.setFont(QtGui.QFont("Roboto Light", 32))
+        self.detected_persons_label.setAlignment(QtCore.Qt.AlignCenter)
         self.detection_widget_layout.addWidget(self.detected_persons_label, 0, 0, 2, 1)
 
         self.detection_settings_layout = QtWidgets.QVBoxLayout(self)
         self.detection_widget_layout.addLayout(self.detection_settings_layout, 0, 1, 2, 1)
         self.detection_settings_layout.addWidget(QtWidgets.QLabel("Detection settings"))
 
-        self.video_thread = VideoThread()
-        self.video_thread.change_pixmap_signal.connect(self.update_image)
-        self.video_thread.start()
+        self.start_detection_button = QtWidgets.QPushButton("Start detection", self)
+        self.start_detection_button.clicked.connect(self.start_detection)
+        self.detection_settings_layout.addWidget(self.start_detection_button)
+
+        self.__camera_service = camera_service
+        self.__camera_service.start_video_thread(self.update_image)
+
+        self.__detection_service = detection_service
 
     @QtCore.pyqtSlot(np.ndarray)
     def update_image(self, cv_img):
         qt_img = self.convert_cv_qt(cv_img)
-        self.detected_persons_label.setPixmap(qt_img)
+        self.detected_persons_label.setPixmap(qt_img.scaled(self.detected_persons_label.width(),
+                                                            self.detected_persons_label.height(), QtCore.Qt.KeepAspectRatio))
+
+    @QtCore.pyqtSlot()
+    def start_detection(self):
+        self.__detection_service.initialize_detection_model(os.path.join("detection_models", "yolov4-tiny.weights"),
+                                                            os.path.join("detection_models", "yolov4-tiny.cfg"),
+                                                            1.0 / 255, (416, 416))
+        self.__camera_service.update_video_callback(self.update_image_with_detected_objects)
+
+    @QtCore.pyqtSlot(np.ndarray)
+    def update_image_with_detected_objects(self, cv_img):
+        start_detection_time = time.time()
+        class_ids, confidences, boxes = self.__detection_service.detect_objects(cv_img, 0.2, 0.4)
+        end_detection_time = time.time()
+
+        qt_img = self.convert_cv_qt(cv_img)
+
+        painter = QtGui.QPainter()
+        painter.begin(qt_img)
+        bounding_box_pen = QtGui.QPen()
+        bounding_box_pen.setColor(QtGui.QColor(0, 255, 0))
+        bounding_box_pen.setWidth(3)
+        painter.setPen(bounding_box_pen)
+        location_brush = QtGui.QBrush(QtGui.QColor(255, 0, 0))
+        location_pen = QtGui.QPen()
+        location_pen.setColor(QtGui.QColor(0, 0, 255))
+        for (class_id, confidence, box) in zip(class_ids, confidences, boxes):
+            if class_id == 0:
+                painter.setPen(bounding_box_pen)
+                painter.drawRect(box[0], box[1], box[2], box[3])
+                painter.setBrush(location_brush)
+                painter.drawEllipse(QtCore.QPoint((box[0] + box[2]) / 2 + (box[0] / 2), box[1] + box[3]), 5, 5)
+
+                painter.drawText(box[0], box[1] - 10, "Person: %.2f" % confidence)
+
+        painter.drawText(0, 15, "FPS: %.2f" % (1 / (end_detection_time - start_detection_time)))
+        painter.end()
+
+        self.detected_persons_label.setPixmap(
+            qt_img.scaled(self.detected_persons_label.width(), self.detected_persons_label.height(), QtCore.Qt.KeepAspectRatio))
 
     def convert_cv_qt(self, cv_img):
         """Convert from an opencv image to QPixmap"""
@@ -189,10 +220,7 @@ class DetectionWidget(QtWidgets.QWidget):
         h, w, ch = rgb_image.shape
         bytes_per_line = ch * w
         convert_to_Qt_format = QtGui.QImage(rgb_image.data, w, h, bytes_per_line, QtGui.QImage.Format_RGB888)
-        # p = convert_to_Qt_format.scaled(self.display_width, self.display_height, QtCore.Qt.KeepAspectRatio)
-        p = convert_to_Qt_format.scaled(self.detected_persons_label.width(), self.detected_persons_label.height(),
-                                        QtCore.Qt.KeepAspectRatio)
-        return QtGui.QPixmap.fromImage(p)
+        return QtGui.QPixmap.fromImage(convert_to_Qt_format)
 
 
 class DetectionModelsWidget(QtWidgets.QWidget):
@@ -205,12 +233,9 @@ class DetectionModelsWidget(QtWidgets.QWidget):
 
 
 class SettingsWidget(QtWidgets.QWidget):
-    def __init__(self,
-                 service: services.SettingsService = Provide[DependencyInjectionContainer.settings_service_provider]):
+    def __init__(self):
         super(SettingsWidget, self).__init__()
         self.init_ui()
-
-        service.hello()
 
     def init_ui(self):
         lbl = QtWidgets.QLabel("Settings widget", self)

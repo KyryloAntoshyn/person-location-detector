@@ -7,4 +7,5 @@ class DependencyInjectionContainer(containers.DeclarativeContainer):
     Dependency injection container class.
     """
     configuration_provider = providers.Configuration()
-    settings_service_provider = providers.Singleton(services.SettingsService)
+    camera_service_provider = providers.Singleton(services.CameraService)
+    detection_service_provider = providers.Singleton(services.DetectionService)
