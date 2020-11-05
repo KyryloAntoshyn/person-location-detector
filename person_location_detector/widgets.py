@@ -3,9 +3,9 @@ from dependency_injector.wiring import Provide
 from dependency_injection import DependencyInjectionContainer
 from PyQt5 import QtWidgets, QtCore, QtGui
 import numpy as np
-import cv2 as cv
 import os
 import time
+import helpers
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -39,8 +39,9 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         Sets window parameters and centers it.
         """
-        self.setMinimumSize(1280, 720)
         self.setWindowState(QtCore.Qt.WindowMaximized)
+        self.setFixedSize(QtWidgets.QApplication.primaryScreen().availableGeometry().size())
+
         self.setWindowIcon(QtGui.QIcon(":/icons/person_detection"))
         self.setWindowTitle("Person Location Detector")
 
@@ -140,7 +141,77 @@ class MainWindow(QtWidgets.QMainWindow):
         self.central_widget_layout.addWidget(self.widgets_stacked_widget)
 
 
+class ProjectionAreaWidget(QtWidgets.QWidget):
+    PROJECTION_AREA_POINTS_MAX_COUNT = 4
+    projection_area_set = QtCore.pyqtSignal()
+
+    def __init__(self, parent=None):
+        super(ProjectionAreaWidget, self).__init__(parent=parent)
+
+        self.__is_setting_projection_area = False
+        self.__is_clearing_projection_area = False
+        self.__projection_area_points = QtGui.QPolygon()
+
+    def mousePressEvent(self, event):
+        if self.__is_setting_projection_area:
+            if self.__projection_area_points.count() < 4:
+                self.__projection_area_points << event.pos()
+                self.update()
+            else:
+                self.__is_setting_projection_area = False
+                self.projection_area_set.emit()
+
+    def paintEvent(self, event):
+        if self.__is_clearing_projection_area:
+            QtGui.QPainter(self).eraseRect(event.rect())
+            return
+
+        projection_area_points_count = self.__projection_area_points.count()
+        if projection_area_points_count == 0:
+            return
+
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        painter.setPen(QtGui.QPen(QtGui.QColor(0, 255, 0), 5))
+        painter.setBrush(QtGui.QBrush(QtGui.QColor(0, 255, 0)))
+
+        current_projection_area_point = self.__projection_area_points.point(0)
+        painter.drawEllipse(current_projection_area_point, 5, 5)
+
+        if projection_area_points_count > 1:
+            for i in range(1, projection_area_points_count):
+                next_projection_area_point = self.__projection_area_points.point(i)
+                painter.drawEllipse(next_projection_area_point, 5, 5)
+                painter.drawLine(current_projection_area_point, next_projection_area_point)
+                current_projection_area_point = next_projection_area_point
+
+            if projection_area_points_count == self.PROJECTION_AREA_POINTS_MAX_COUNT:
+                painter.drawLine(current_projection_area_point, self.__projection_area_points.point(0))
+
+    def set_projection_area(self):
+        self.__is_setting_projection_area = True
+
+    def clear_projection_area(self):
+        self.__is_setting_projection_area = False
+        self.__is_clearing_projection_area = True
+        self.__projection_area_points.clear()
+        self.update()
+        self.__is_clearing_projection_area = False
+
+
 class DetectionWidget(QtWidgets.QWidget):
+    PROJECTION_AREA_RESOLUTIONS = {
+        "1920×1080": (1920, 1080),
+        "1280×720": (1280, 720),
+        "640×480": (640, 480)
+    }
+
+    CAMERA_RESOLUTIONS = {
+        "1920×1080": (1920, 1080),
+        "1280×720": (1280, 720),
+        "640×480": (640, 480)
+    }
+
     def __init__(self,
                  camera_service: services.CameraService = Provide[DependencyInjectionContainer.camera_service_provider],
                  detection_service: services.DetectionService = Provide[
@@ -148,32 +219,167 @@ class DetectionWidget(QtWidgets.QWidget):
         super(DetectionWidget, self).__init__()
 
         self.detection_widget_layout = QtWidgets.QGridLayout(self)
+        self.detection_widget_layout.setRowStretch(0, 1)
+        self.detection_widget_layout.setRowStretch(1, 1)
         self.detection_widget_layout.setColumnStretch(0, 6)
         self.detection_widget_layout.setColumnStretch(1, 4)
 
-        self.detected_persons_label = QtWidgets.QLabel("Camera is initializing...", self)
-        self.detected_persons_label.setFont(QtGui.QFont("Roboto Light", 32))
-        self.detected_persons_label.setAlignment(QtCore.Qt.AlignCenter)
-        self.detection_widget_layout.addWidget(self.detected_persons_label, 0, 0, 2, 1)
+        # Camera stream widgets
+        self.camera_stream_widgets_layout = QtWidgets.QGridLayout(self)
+        self.camera_stream_widgets_layout.setRowStretch(0, 0)
+        self.camera_stream_widgets_layout.setRowStretch(1, 1)
 
-        self.detection_settings_layout = QtWidgets.QVBoxLayout(self)
-        self.detection_widget_layout.addLayout(self.detection_settings_layout, 0, 1, 2, 1)
-        self.detection_settings_layout.addWidget(QtWidgets.QLabel("Detection settings"))
+        self.camera_stream_label = QtWidgets.QLabel("Camera stream", self)
+        self.camera_stream_widgets_layout.addWidget(self.camera_stream_label, 0, 0)
 
-        self.start_detection_button = QtWidgets.QPushButton("Start detection", self)
-        self.start_detection_button.clicked.connect(self.start_detection)
-        self.detection_settings_layout.addWidget(self.start_detection_button)
+        self.projection_area_camera_stream_label = QtWidgets.QLabel("Camera is initializing...", self)
+        self.projection_area_camera_stream_label.setFont(QtGui.QFont("Roboto", 28))
+        self.projection_area_camera_stream_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.camera_stream_widgets_layout.addWidget(self.projection_area_camera_stream_label, 1, 0)
+
+        self.projection_area_widget = None
+
+        self.detection_widget_layout.addLayout(self.camera_stream_widgets_layout, 0, 0, 1, 1)
+
+        # Detection settings widgets
+        self.settings_layout = QtWidgets.QVBoxLayout(self)
+        self.settings_layout.setSpacing(35)
+        self.detection_widget_layout.addLayout(self.settings_layout, 0, 1, 2, 1)
+
+        # Camera
+        self.camera_settings_group_box = QtWidgets.QGroupBox("Camera settings", self)
+        self.settings_layout.addWidget(self.camera_settings_group_box)
+        self.camera_settings_group_box_layout = QtWidgets.QFormLayout(self.camera_settings_group_box)
+        self.camera_settings_group_box_layout.setSpacing(15)
+
+        self.camera_indexes_combo_box = QtWidgets.QComboBox(self.camera_settings_group_box)
+        self.camera_indexes_combo_box.addItem("0")
+        self.camera_settings_group_box_layout.addRow("Camera index", self.camera_indexes_combo_box)
+
+        self.camera_resolutions_combo_box = QtWidgets.QComboBox(self.camera_settings_group_box)
+        camera_resolutions_list = list(self.CAMERA_RESOLUTIONS.keys())
+        camera_resolutions_list.append("Other")
+        self.camera_resolutions_combo_box.addItems(camera_resolutions_list)
+        self.camera_resolutions_combo_box.currentTextChanged.connect(self.resolutions_combo_box_selection_changed)
+        self.camera_settings_group_box_layout.addRow("Camera resolution", self.camera_resolutions_combo_box)
+
+        self.other_camera_resolution_layout = QtWidgets.QGridLayout(self.camera_settings_group_box)
+
+        self.camera_width_line_edit = QtWidgets.QLineEdit(self.camera_settings_group_box)
+        self.camera_width_line_edit.setPlaceholderText("Width")
+        self.camera_width_line_edit.setEnabled(False)
+        self.other_camera_resolution_layout.addWidget(self.camera_width_line_edit, 0, 0)
+
+        self.camera_height_line_edit = QtWidgets.QLineEdit(self.camera_settings_group_box)
+        self.camera_height_line_edit.setPlaceholderText("Height")
+        self.camera_height_line_edit.setEnabled(False)
+        self.other_camera_resolution_layout.addWidget(self.camera_height_line_edit, 0, 1)
+
+        self.camera_settings_group_box_layout.addRow(self.other_camera_resolution_layout)
+
+        # Projection area
+        self.projection_area_settings_group_box = QtWidgets.QGroupBox("Projection area settings", self)
+        self.projection_area_settings_group_box_layout = QtWidgets.QFormLayout(self.projection_area_settings_group_box)
+        self.projection_area_settings_group_box_layout.setSpacing(15)
+        self.settings_layout.addWidget(self.projection_area_settings_group_box)
+
+        self.set_and_clear_projection_area_push_buttons_layout = QtWidgets.QGridLayout(
+            self.projection_area_settings_group_box)
+
+        self.set_projection_area_push_button = QtWidgets.QPushButton("Set projection area",
+                                                                     self.projection_area_settings_group_box)
+        self.set_projection_area_push_button.clicked.connect(self.set_or_clear_projection_area)
+        self.set_and_clear_projection_area_push_buttons_layout.addWidget(self.set_projection_area_push_button, 0, 0)
+
+        self.clear_projection_area_push_button = QtWidgets.QPushButton("Clear projection area",
+                                                                       self.projection_area_settings_group_box)
+        self.clear_projection_area_push_button.clicked.connect(self.set_or_clear_projection_area)
+        self.set_and_clear_projection_area_push_buttons_layout.addWidget(self.clear_projection_area_push_button, 0, 1)
+
+        self.projection_area_settings_group_box_layout.addRow(self.set_and_clear_projection_area_push_buttons_layout)
+
+        self.projection_area_resolutions_combo_box = QtWidgets.QComboBox(self.projection_area_settings_group_box)
+        projection_resolutions_list = list(self.PROJECTION_AREA_RESOLUTIONS.keys())
+        projection_resolutions_list.append("Other")
+        self.projection_area_resolutions_combo_box.addItems(projection_resolutions_list)
+        self.projection_area_resolutions_combo_box.currentTextChanged.connect(
+            self.resolutions_combo_box_selection_changed)
+        self.projection_area_settings_group_box_layout.addRow("Projection area resolution",
+                                                              self.projection_area_resolutions_combo_box)
+
+        self.other_projection_area_resolution_layout = QtWidgets.QGridLayout(self.projection_area_settings_group_box)
+
+        self.projection_area_width_line_edit = QtWidgets.QLineEdit(self.projection_area_settings_group_box)
+        self.projection_area_width_line_edit.setPlaceholderText("Width")
+        self.projection_area_width_line_edit.setEnabled(False)
+        self.other_projection_area_resolution_layout.addWidget(self.projection_area_width_line_edit, 0, 0)
+
+        self.projection_area_height_line_edit = QtWidgets.QLineEdit(self.projection_area_settings_group_box)
+        self.projection_area_height_line_edit.setPlaceholderText("Height")
+        self.projection_area_height_line_edit.setEnabled(False)
+        self.other_projection_area_resolution_layout.addWidget(self.projection_area_height_line_edit, 0, 1)
+
+        self.projection_area_settings_group_box_layout.addRow(self.other_projection_area_resolution_layout)
+
+        # Detection
+        self.detection_settings_group_box = QtWidgets.QGroupBox("Detection settings", self)
+        self.settings_layout.addWidget(self.detection_settings_group_box)
+        self.detection_settings_group_box_layout = QtWidgets.QFormLayout(self.detection_settings_group_box)
+        self.detection_settings_group_box_layout.setSpacing(15)
+
+        self.detection_models_combo_box = QtWidgets.QComboBox(self.detection_settings_group_box)
+        self.detection_models_combo_box.addItems(["YOLOv4"])
+        self.detection_settings_group_box_layout.addRow("Detection model", self.detection_models_combo_box)
+
+        self.confidence_threshold_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal, self.detection_settings_group_box)
+        self.detection_settings_group_box_layout.addRow("Confidence threshold", self.confidence_threshold_slider)
+
+        self.nms_threshold_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal, self.detection_settings_group_box)
+        self.detection_settings_group_box_layout.addRow("NMS threshold", self.nms_threshold_slider)
+
+        self.start_and_stop_detection_push_buttons_layout = QtWidgets.QGridLayout(self)
+
+        self.start_detection_push_button = QtWidgets.QPushButton("Start detection",
+                                                                 self.detection_settings_group_box)
+        self.start_detection_push_button.clicked.connect(self.start_detection)
+        self.start_and_stop_detection_push_buttons_layout.addWidget(self.start_detection_push_button, 0, 0)
+
+        self.stop_detection_push_button = QtWidgets.QPushButton("Stop detection",
+                                                                self.detection_settings_group_box)
+        self.stop_detection_push_button.clicked.connect(self.stop_detection)
+        self.start_and_stop_detection_push_buttons_layout.addWidget(self.stop_detection_push_button, 0, 1)
+
+        self.show_detections_push_button = QtWidgets.QPushButton("Show detections", self.detection_settings_group_box)
+        self.show_detections_push_button.setCheckable(True)
+        self.start_and_stop_detection_push_buttons_layout.addWidget(self.show_detections_push_button, 1, 0, 1, 2)
+
+        self.detection_settings_group_box_layout.addRow(self.start_and_stop_detection_push_buttons_layout)
+
+        self.settings_layout.addStretch()
 
         self.__camera_service = camera_service
-        self.__camera_service.start_video_thread(self.update_image)
+        self.__camera_service.start_video_thread(self.update_first_frame)
 
         self.__detection_service = detection_service
 
     @QtCore.pyqtSlot(np.ndarray)
-    def update_image(self, cv_img):
-        qt_img = self.convert_cv_qt(cv_img)
-        self.detected_persons_label.setPixmap(qt_img.scaled(self.detected_persons_label.width(),
-                                                            self.detected_persons_label.height(), QtCore.Qt.KeepAspectRatio))
+    def update_first_frame(self, camera_frame):
+        self.projection_area_camera_stream_label.setPixmap(
+            helpers.convert_opencv_image_to_pixmap(camera_frame).scaled(self.projection_area_camera_stream_label.size(),
+                                                                        QtCore.Qt.KeepAspectRatio))
+
+        # Create projection area widget
+        self.projection_area_widget = ProjectionAreaWidget(self)
+        self.projection_area_widget.setFixedSize(self.projection_area_camera_stream_label.pixmap().size())
+        self.camera_stream_widgets_layout.addWidget(self.projection_area_widget, 1, 0, alignment=QtCore.Qt.AlignHCenter)
+
+        self.__camera_service.update_video_callback(self.update_image)
+
+    @QtCore.pyqtSlot(np.ndarray)
+    def update_image(self, camera_frame):
+        self.projection_area_camera_stream_label.setPixmap(
+            helpers.convert_opencv_image_to_pixmap(camera_frame).scaled(self.projection_area_camera_stream_label.size(),
+                                                                        QtCore.Qt.KeepAspectRatio))
 
     @QtCore.pyqtSlot()
     def start_detection(self):
@@ -182,16 +388,20 @@ class DetectionWidget(QtWidgets.QWidget):
                                                             1.0 / 255, (416, 416))
         self.__camera_service.update_video_callback(self.update_image_with_detected_objects)
 
+    @QtCore.pyqtSlot()
+    def stop_detection(self):
+        self.__camera_service.update_video_callback(self.update_image)
+
     @QtCore.pyqtSlot(np.ndarray)
-    def update_image_with_detected_objects(self, cv_img):
+    def update_image_with_detected_objects(self, camera_frame):
         start_detection_time = time.time()
-        class_ids, confidences, boxes = self.__detection_service.detect_objects(cv_img, 0.2, 0.4)
+        class_ids, confidences, boxes = self.__detection_service.detect_objects(camera_frame, 0.2, 0.4)
         end_detection_time = time.time()
 
-        qt_img = self.convert_cv_qt(cv_img)
+        pixmap = helpers.convert_opencv_image_to_pixmap(camera_frame)
 
         painter = QtGui.QPainter()
-        painter.begin(qt_img)
+        painter.begin(pixmap)
         bounding_box_pen = QtGui.QPen()
         bounding_box_pen.setColor(QtGui.QColor(0, 255, 0))
         bounding_box_pen.setWidth(3)
@@ -211,16 +421,35 @@ class DetectionWidget(QtWidgets.QWidget):
         painter.drawText(0, 15, "FPS: %.2f" % (1 / (end_detection_time - start_detection_time)))
         painter.end()
 
-        self.detected_persons_label.setPixmap(
-            qt_img.scaled(self.detected_persons_label.width(), self.detected_persons_label.height(), QtCore.Qt.KeepAspectRatio))
+        self.projection_area_camera_stream_label.setPixmap(
+            pixmap.scaled(self.projection_area_camera_stream_label.size(),
+                          QtCore.Qt.KeepAspectRatio))
 
-    def convert_cv_qt(self, cv_img):
-        """Convert from an opencv image to QPixmap"""
-        rgb_image = cv.cvtColor(cv_img, cv.COLOR_BGR2RGB)
-        h, w, ch = rgb_image.shape
-        bytes_per_line = ch * w
-        convert_to_Qt_format = QtGui.QImage(rgb_image.data, w, h, bytes_per_line, QtGui.QImage.Format_RGB888)
-        return QtGui.QPixmap.fromImage(convert_to_Qt_format)
+    @QtCore.pyqtSlot()
+    def set_or_clear_projection_area(self):
+        if self.sender() == self.set_projection_area_push_button:
+            self.projection_area_widget.set_projection_area()
+            self.set_projection_area_push_button.setEnabled(False)
+        else:
+            self.projection_area_widget.clear_projection_area()
+            self.set_projection_area_push_button.setEnabled(True)
+
+    @QtCore.pyqtSlot(str)
+    def resolutions_combo_box_selection_changed(self, current_text):
+        if self.sender() == self.projection_area_resolutions_combo_box:
+            if current_text in self.PROJECTION_AREA_RESOLUTIONS:
+                self.projection_area_width_line_edit.setEnabled(False)
+                self.projection_area_height_line_edit.setEnabled(False)
+            else:
+                self.projection_area_width_line_edit.setEnabled(True)
+                self.projection_area_height_line_edit.setEnabled(True)
+        else:
+            if current_text in self.CAMERA_RESOLUTIONS:
+                self.camera_width_line_edit.setEnabled(False)
+                self.camera_height_line_edit.setEnabled(False)
+            else:
+                self.camera_width_line_edit.setEnabled(True)
+                self.camera_height_line_edit.setEnabled(True)
 
 
 class DetectionModelsWidget(QtWidgets.QWidget):

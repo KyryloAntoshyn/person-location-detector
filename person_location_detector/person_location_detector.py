@@ -17,7 +17,7 @@ class ApplicationInitializer:
         """
         container = DependencyInjectionContainer()
         container.configuration_provider.from_ini("configuration.ini")
-        container.wire(modules=[sys.modules[widgets.__name__]])
+        container.wire(modules=[widgets])
 
     @staticmethod
     def initialize_and_start_application():
@@ -25,9 +25,8 @@ class ApplicationInitializer:
         Creates application, applies global styles, creates main window, shows it and starts application event loop.
         """
         application = QtWidgets.QApplication(sys.argv)
-        QtGui.QFontDatabase.addApplicationFont(":/fonts/roboto_light")
         QtGui.QFontDatabase.addApplicationFont(":/fonts/roboto_regular")
-        application.setFont(QtGui.QFont("Roboto Light", 14))
+        application.setFont(QtGui.QFont("Roboto", 14))
 
         main_window = widgets.MainWindow()
         main_window.show()

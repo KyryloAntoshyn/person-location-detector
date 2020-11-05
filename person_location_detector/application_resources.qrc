@@ -1,7 +1,6 @@
 <!DOCTYPE RCC>
 <RCC version="1.0">
     <qresource prefix="/fonts">
-        <file alias="roboto_light">resources/fonts/roboto_light.ttf</file>
         <file alias="roboto_regular">resources/fonts/roboto_regular.ttf</file>
     </qresource>
     <qresource prefix="/icons">
