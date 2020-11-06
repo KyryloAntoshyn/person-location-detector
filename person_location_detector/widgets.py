@@ -155,12 +155,13 @@ class ProjectionAreaWidget(QtWidgets.QWidget):
 
     def mousePressEvent(self, event):
         if self.__is_setting_projection_area:
-            if self.__projection_area_points.count() < 4:
+            if self.__projection_area_points.count() < self.PROJECTION_AREA_POINTS_MAX_COUNT:
                 self.__projection_area_points << event.pos()
                 self.update()
-            else:
-                self.__is_setting_projection_area = False
-                self.projection_area_set.emit()
+
+                if self.__projection_area_points.count() == self.PROJECTION_AREA_POINTS_MAX_COUNT:
+                    self.__is_setting_projection_area = False
+                    self.projection_area_set.emit()
 
     def paintEvent(self, event):
         if self.__is_clearing_projection_area:
@@ -348,6 +349,7 @@ class DetectionWidget(QtWidgets.QWidget):
         self.other_projection_area_resolution_layout.addWidget(self.projection_area_height_spin_box, 0, 1)
 
         self.projection_area_settings_group_box_layout.addRow(self.other_projection_area_resolution_layout)
+        self.change_projection_area_settings_widgets_state(False)
 
         # Detection
         self.detection_settings_group_box = QtWidgets.QGroupBox("Detection settings", self)
@@ -359,11 +361,35 @@ class DetectionWidget(QtWidgets.QWidget):
         self.detection_models_combo_box.addItems(["YOLOv4"])
         self.detection_settings_group_box_layout.addRow("Detection model", self.detection_models_combo_box)
 
+        self.confidence_threshold_slider_layout = QtWidgets.QHBoxLayout(self.detection_settings_group_box)
+
         self.confidence_threshold_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal, self.detection_settings_group_box)
-        self.detection_settings_group_box_layout.addRow("Confidence threshold", self.confidence_threshold_slider)
+        self.confidence_threshold_slider.setMinimum(0)
+        self.confidence_threshold_slider.setMaximum(100)
+        self.confidence_threshold_slider.setValue(50)
+        self.confidence_threshold_slider.valueChanged.connect(self.slider_value_changed)
+        self.confidence_threshold_slider_layout.addWidget(self.confidence_threshold_slider)
+
+        self.confidence_threshold_label = QtWidgets.QLabel("0.5", self.detection_settings_group_box)
+        self.confidence_threshold_label.setFixedWidth(40)
+        self.confidence_threshold_slider_layout.addWidget(self.confidence_threshold_label)
+
+        self.detection_settings_group_box_layout.addRow("Confidence threshold", self.confidence_threshold_slider_layout)
+
+        self.nms_threshold_slider_layout = QtWidgets.QHBoxLayout(self.detection_settings_group_box)
 
         self.nms_threshold_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal, self.detection_settings_group_box)
-        self.detection_settings_group_box_layout.addRow("NMS threshold", self.nms_threshold_slider)
+        self.nms_threshold_slider.setMinimum(0)
+        self.nms_threshold_slider.setMaximum(100)
+        self.nms_threshold_slider.setValue(40)
+        self.nms_threshold_slider.valueChanged.connect(self.slider_value_changed)
+        self.nms_threshold_slider_layout.addWidget(self.nms_threshold_slider)
+
+        self.nms_threshold_label = QtWidgets.QLabel("0.4", self.detection_settings_group_box)
+        self.nms_threshold_label.setFixedWidth(40)
+        self.nms_threshold_slider_layout.addWidget(self.nms_threshold_label)
+
+        self.detection_settings_group_box_layout.addRow("NMS threshold", self.nms_threshold_slider_layout)
 
         self.start_and_stop_detection_push_buttons_layout = QtWidgets.QGridLayout(self)
 
@@ -377,11 +403,8 @@ class DetectionWidget(QtWidgets.QWidget):
         self.stop_detection_push_button.clicked.connect(self.stop_detection)
         self.start_and_stop_detection_push_buttons_layout.addWidget(self.stop_detection_push_button, 0, 1)
 
-        self.show_detections_push_button = QtWidgets.QPushButton("Show detections", self.detection_settings_group_box)
-        self.show_detections_push_button.setCheckable(True)
-        self.start_and_stop_detection_push_buttons_layout.addWidget(self.show_detections_push_button, 1, 0, 1, 2)
-
         self.detection_settings_group_box_layout.addRow(self.start_and_stop_detection_push_buttons_layout)
+        self.change_detection_settings_widgets_state(False)
 
         self.settings_layout.addStretch()
 
@@ -405,6 +428,9 @@ class DetectionWidget(QtWidgets.QWidget):
                                                       self.update_first_frame)
         else:
             self.camera_settings_and_stream_initial_state()
+            self.change_projection_area_settings_widgets_state(False)
+            self.change_detection_settings_widgets_state(False)
+            self.projection_area_widget.clear_projection_area()
 
             self.__camera_service.stop_camera_stream()
 
@@ -412,11 +438,12 @@ class DetectionWidget(QtWidgets.QWidget):
     def camera_initialized(self, is_successful):
         if is_successful:
             self.stop_camera_stream_push_button.setEnabled(True)
+            self.change_projection_area_settings_widgets_state(True)
         else:
             self.camera_settings_and_stream_initial_state()
             QtWidgets.QMessageBox.critical(self, "Error",
                                            "An error occurred during camera initialization!"
-                                           "Probably, there is no camera with such index.")
+                                           "Probably there is no connected camera with such index.")
 
     def camera_settings_and_stream_initial_state(self):
         self.camera_indexes_combo_box.setEnabled(True)
@@ -437,31 +464,103 @@ class DetectionWidget(QtWidgets.QWidget):
         # Create projection area widget
         self.projection_area_widget = ProjectionAreaWidget(self)
         self.projection_area_widget.setFixedSize(self.projection_area_camera_stream_label.pixmap().size())
+        self.projection_area_widget.projection_area_set.connect(self.projection_area_set)
         self.camera_stream_widgets_layout.addWidget(self.projection_area_widget, 1, 0, alignment=QtCore.Qt.AlignHCenter)
 
-        self.__camera_service.update_camera_frame_read_callback(self.update_image)
+        self.__camera_service.update_camera_frame_read_callback(self.camera_frame_read)
+
+    def change_projection_area_settings_widgets_state(self, is_enabled):
+        self.set_projection_area_push_button.setEnabled(is_enabled)
+        self.clear_projection_area_push_button.setEnabled(is_enabled)
+        self.projection_area_resolutions_combo_box.setEnabled(is_enabled)
+
+        if self.projection_area_resolutions_combo_box.currentText() not in self.PROJECTION_AREA_RESOLUTIONS:
+            self.projection_area_width_spin_box.setEnabled(is_enabled)
+            self.projection_area_height_spin_box.setEnabled(is_enabled)
+
+    @QtCore.pyqtSlot()
+    def set_or_clear_projection_area(self):
+        if self.sender() == self.set_projection_area_push_button:
+            self.set_projection_area_push_button.setEnabled(False)
+            self.projection_area_widget.set_projection_area()
+        else:
+            self.set_projection_area_push_button.setEnabled(True)
+            self.change_detection_settings_widgets_state(False)
+            self.projection_area_widget.clear_projection_area()
+
+    @QtCore.pyqtSlot(str)
+    def resolutions_combo_box_selection_changed(self, current_text):
+        if self.sender() == self.projection_area_resolutions_combo_box:
+            if current_text in self.PROJECTION_AREA_RESOLUTIONS:
+                self.projection_area_width_spin_box.setEnabled(False)
+                self.projection_area_height_spin_box.setEnabled(False)
+            else:
+                self.projection_area_width_spin_box.setEnabled(True)
+                self.projection_area_height_spin_box.setEnabled(True)
+        else:
+            if current_text in self.CAMERA_RESOLUTIONS:
+                self.camera_width_spin_box.setEnabled(False)
+                self.camera_height_spin_box.setEnabled(False)
+            else:
+                self.camera_width_spin_box.setEnabled(True)
+                self.camera_height_spin_box.setEnabled(True)
+
+    def change_detection_settings_widgets_state(self, is_enabled):
+        self.detection_models_combo_box.setEnabled(is_enabled)
+        self.confidence_threshold_slider.setEnabled(is_enabled)
+        self.confidence_threshold_label.setEnabled(is_enabled)
+        self.nms_threshold_slider.setEnabled(is_enabled)
+        self.nms_threshold_label.setEnabled(is_enabled)
+        self.start_detection_push_button.setEnabled(is_enabled)
+        self.stop_detection_push_button.setEnabled(is_enabled)
+
+    @QtCore.pyqtSlot()
+    def projection_area_set(self):
+        self.change_detection_settings_widgets_state(True)
+        self.stop_detection_push_button.setEnabled(False)
 
     @QtCore.pyqtSlot(np.ndarray)
-    def update_image(self, camera_frame):
+    def camera_frame_read(self, camera_frame):
         self.projection_area_camera_stream_label.setPixmap(
             helpers.convert_opencv_image_to_pixmap(camera_frame).scaled(self.projection_area_camera_stream_label.size(),
                                                                         QtCore.Qt.KeepAspectRatio))
+
+    @QtCore.pyqtSlot(int)
+    def slider_value_changed(self, value):
+        if self.sender() == self.confidence_threshold_slider:
+            self.confidence_threshold_label.setText(str(round(value * 0.01, 2)))
+        else:
+            self.nms_threshold_label.setText(str(round(value * 0.01, 2)))
 
     @QtCore.pyqtSlot()
     def start_detection(self):
         self.__detection_service.initialize_detection_model(os.path.join("detection_models", "yolov4-tiny.weights"),
                                                             os.path.join("detection_models", "yolov4-tiny.cfg"),
                                                             1.0 / 255, (416, 416))
-        self.__camera_service.update_camera_frame_read_callback(self.update_image_with_detected_objects)
+        self.__camera_service.update_camera_frame_read_callback(self.camera_frame_read_extended)
+        self.start_detection_push_button.setEnabled(False)
+        self.stop_detection_push_button.setEnabled(True)
+        self.change_camera_and_projection_area_settings_group_boxes_state(False)
 
     @QtCore.pyqtSlot()
     def stop_detection(self):
-        self.__camera_service.update_camera_frame_read_callback(self.update_image)
+        self.__camera_service.update_camera_frame_read_callback(self.camera_frame_read)
+        self.stop_detection_push_button.setEnabled(False)
+        self.start_detection_push_button.setEnabled(True)
+        self.change_camera_and_projection_area_settings_group_boxes_state(True)
+
+    def change_camera_and_projection_area_settings_group_boxes_state(self, is_enabled):
+        self.camera_settings_group_box.setEnabled(is_enabled)
+        self.projection_area_settings_group_box.setEnabled(is_enabled)
+        self.detection_models_combo_box.setEnabled(is_enabled)
 
     @QtCore.pyqtSlot(np.ndarray)
-    def update_image_with_detected_objects(self, camera_frame):
+    def camera_frame_read_extended(self, camera_frame):
         start_detection_time = time.time()
-        class_ids, confidences, boxes = self.__detection_service.detect_objects(camera_frame, 0.2, 0.4)
+
+        class_ids, confidences, boxes = self.__detection_service.detect_objects(camera_frame,
+                                                                                self.confidence_threshold_slider.value() * 0.01,
+                                                                                self.nms_threshold_slider.value() * 0.01)
         end_detection_time = time.time()
 
         pixmap = helpers.convert_opencv_image_to_pixmap(camera_frame)
@@ -490,32 +589,6 @@ class DetectionWidget(QtWidgets.QWidget):
         self.projection_area_camera_stream_label.setPixmap(
             pixmap.scaled(self.projection_area_camera_stream_label.size(),
                           QtCore.Qt.KeepAspectRatio))
-
-    @QtCore.pyqtSlot()
-    def set_or_clear_projection_area(self):
-        if self.sender() == self.set_projection_area_push_button:
-            self.projection_area_widget.set_projection_area()
-            self.set_projection_area_push_button.setEnabled(False)
-        else:
-            self.projection_area_widget.clear_projection_area()
-            self.set_projection_area_push_button.setEnabled(True)
-
-    @QtCore.pyqtSlot(str)
-    def resolutions_combo_box_selection_changed(self, current_text):
-        if self.sender() == self.projection_area_resolutions_combo_box:
-            if current_text in self.PROJECTION_AREA_RESOLUTIONS:
-                self.projection_area_width_spin_box.setEnabled(False)
-                self.projection_area_height_spin_box.setEnabled(False)
-            else:
-                self.projection_area_width_spin_box.setEnabled(True)
-                self.projection_area_height_spin_box.setEnabled(True)
-        else:
-            if current_text in self.CAMERA_RESOLUTIONS:
-                self.camera_width_spin_box.setEnabled(False)
-                self.camera_height_spin_box.setEnabled(False)
-            else:
-                self.camera_width_spin_box.setEnabled(True)
-                self.camera_height_spin_box.setEnabled(True)
 
 
 class DetectionModelsWidget(QtWidgets.QWidget):
