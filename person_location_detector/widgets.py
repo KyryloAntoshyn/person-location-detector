@@ -6,6 +6,7 @@ import numpy as np
 import os
 import time
 import helpers
+import constants
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -15,11 +16,15 @@ class MainWindow(QtWidgets.QMainWindow):
 
     MENU_WIDGET_MIN_AND_MAX_WIDTHS = (38, 255)
 
-    def __init__(self):
+    def __init__(self,
+                 camera_service: services.CameraService = Provide[
+                     DependencyInjectionContainer.camera_service_provider]):
         """
         Initializes widgets, layouts and styles on the main window.
         """
         super(MainWindow, self).__init__()
+
+        self.__camera_service = camera_service
 
         self.central_widget = QtWidgets.QWidget(self)
         self.central_widget_layout = QtWidgets.QHBoxLayout(self.central_widget)
@@ -43,7 +48,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setFixedSize(QtWidgets.QApplication.primaryScreen().availableGeometry().size())
 
         self.setWindowIcon(QtGui.QIcon(":/icons/person_detection"))
-        self.setWindowTitle("Person Location Detector")
+        self.setWindowTitle(constants.APPLICATION_NAME)
 
         frame_geometry = self.frameGeometry()
         frame_geometry.moveCenter(QtWidgets.QDesktopWidget().availableGeometry().center())
@@ -140,6 +145,23 @@ class MainWindow(QtWidgets.QMainWindow):
         Adds widgets stacked widget to the central widget layout.
         """
         self.central_widget_layout.addWidget(self.widgets_stacked_widget)
+
+    def closeEvent(self, event):
+        """
+        Asks user for exit and cleans up application resources.
+
+        :param event: close event
+        """
+        exit_question_result = QtWidgets.QMessageBox.question(self, constants.APPLICATION_NAME,
+                                                              "Are you sure you want to exit?",
+                                                              QtWidgets.QMessageBox.No | QtWidgets.QMessageBox.Yes,
+                                                              QtWidgets.QMessageBox.No)
+        if exit_question_result == QtWidgets.QMessageBox.Yes:
+            if self.__camera_service.is_camera_stream_reading_active():
+                self.__camera_service.stop_camera_stream_reading()
+            event.accept()
+        else:
+            event.ignore()
 
 
 class ProjectionAreaWidget(QtWidgets.QWidget):
@@ -424,15 +446,15 @@ class DetectionWidget(QtWidgets.QWidget):
                 camera_resolution = self.CAMERA_RESOLUTIONS[self.camera_resolutions_combo_box.currentText()]
             else:
                 camera_resolution = (self.camera_width_spin_box.value(), self.camera_height_spin_box.value())
-            self.__camera_service.start_camera_stream(camera_index, camera_resolution, self.camera_initialized,
-                                                      self.update_first_frame)
+            self.__camera_service.start_camera_stream_reading(camera_index, camera_resolution, self.camera_initialized,
+                                                              self.update_first_frame)
         else:
             self.camera_settings_and_stream_initial_state()
             self.change_projection_area_settings_widgets_state(False)
             self.change_detection_settings_widgets_state(False)
             self.projection_area_widget.clear_projection_area()
 
-            self.__camera_service.stop_camera_stream()
+            self.__camera_service.stop_camera_stream_reading()
 
     @QtCore.pyqtSlot(bool)
     def camera_initialized(self, is_successful):
@@ -440,6 +462,7 @@ class DetectionWidget(QtWidgets.QWidget):
             self.stop_camera_stream_push_button.setEnabled(True)
             self.change_projection_area_settings_widgets_state(True)
         else:
+            self.__camera_service.stop_camera_stream_reading()
             self.camera_settings_and_stream_initial_state()
             QtWidgets.QMessageBox.critical(self, "Error",
                                            "An error occurred during camera initialization!"
@@ -467,7 +490,7 @@ class DetectionWidget(QtWidgets.QWidget):
         self.projection_area_widget.projection_area_set.connect(self.projection_area_set)
         self.camera_stream_widgets_layout.addWidget(self.projection_area_widget, 1, 0, alignment=QtCore.Qt.AlignHCenter)
 
-        self.__camera_service.update_camera_frame_read_callback(self.camera_frame_read)
+        self.__camera_service.update_camera_frame_read_slot(self.camera_frame_read)
 
     def change_projection_area_settings_widgets_state(self, is_enabled):
         self.set_projection_area_push_button.setEnabled(is_enabled)
@@ -537,14 +560,14 @@ class DetectionWidget(QtWidgets.QWidget):
         self.__detection_service.initialize_detection_model(os.path.join("detection_models", "yolov4-tiny.weights"),
                                                             os.path.join("detection_models", "yolov4-tiny.cfg"),
                                                             1.0 / 255, (416, 416))
-        self.__camera_service.update_camera_frame_read_callback(self.camera_frame_read_extended)
+        self.__camera_service.update_camera_frame_read_slot(self.camera_frame_read_extended)
         self.start_detection_push_button.setEnabled(False)
         self.stop_detection_push_button.setEnabled(True)
         self.change_camera_and_projection_area_settings_group_boxes_state(False)
 
     @QtCore.pyqtSlot()
     def stop_detection(self):
-        self.__camera_service.update_camera_frame_read_callback(self.camera_frame_read)
+        self.__camera_service.update_camera_frame_read_slot(self.camera_frame_read)
         self.stop_detection_push_button.setEnabled(False)
         self.start_detection_push_button.setEnabled(True)
         self.change_camera_and_projection_area_settings_group_boxes_state(True)
