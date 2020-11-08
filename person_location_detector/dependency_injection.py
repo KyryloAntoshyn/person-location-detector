@@ -8,4 +8,4 @@ class DependencyInjectionContainer(containers.DeclarativeContainer):
     """
     configuration_provider = providers.Configuration()
     camera_service_provider = providers.Singleton(services.CameraService)
-    detection_service_provider = providers.Singleton(services.DetectionService)
+    detection_service_provider = providers.Singleton(services.PersonLocationDetectionService)

@@ -1,6 +1,9 @@
 from PyQt5 import QtCore
 import numpy as np
 import cv2 as cv
+import time
+from shapely.geometry import Point, Polygon
+import queue
 
 
 class CameraStreamReaderThread(QtCore.QThread):
@@ -23,6 +26,7 @@ class CameraStreamReaderThread(QtCore.QThread):
         self.__camera_index = camera_index
         self.__camera_resolution = camera_resolution
         self.__is_active = True
+        self.__is_detection_active = False
 
     def run(self):
         """
@@ -40,9 +44,15 @@ class CameraStreamReaderThread(QtCore.QThread):
         self.camera_initialized.emit(True)
 
         while self.__is_active:
-            is_success_frame_read, frame = video_capture.read()
-            if is_success_frame_read:
-                self.camera_frame_read.emit(frame)
+
+            if self.__is_detection_active:
+                is_success_frame_read, frame = video_capture.read()
+                if is_success_frame_read:
+                    self.tasks.put(frame)
+            else:
+                is_success_frame_read, frame = video_capture.read()
+                if is_success_frame_read:
+                    self.camera_frame_read.emit(frame)
 
         video_capture.release()
 
@@ -52,6 +62,9 @@ class CameraStreamReaderThread(QtCore.QThread):
         """
         self.__is_active = False
         self.wait()
+
+    def detection_state_changed(self, is_detection_active):
+        self.__is_detection_active = is_detection_active
 
 
 class CameraService:
@@ -113,16 +126,112 @@ class CameraService:
         """
         return self.__camera_stream_reader_thread is not None
 
+    def detection_started(self, tasks):
+        self.__camera_stream_reader_thread.tasks = tasks
+        self.__camera_stream_reader_thread.detection_state_changed(True)
 
-class DetectionService:
+
+class PersonLocationDetectionThread(QtCore.QThread):
+    camera_frame_processed = QtCore.pyqtSignal(tuple)
+
+    def __init__(self, detection_model_weights_file_path, detection_model_configuration_file_path,
+                 detection_model_scale, detection_model_size, person_class_id, confidence_threshold, nms_threshold,
+                 projection_area_coordinates, projection_area_resolution):
+        super(PersonLocationDetectionThread, self).__init__()
+
+        self.__detection_model_weights_file_path = detection_model_weights_file_path
+        self.__detection_model_configuration_file_path = detection_model_configuration_file_path
+        self.__detection_model_scale = detection_model_scale
+        self.__detection_model_size = detection_model_size
+        self.__person_class_id = person_class_id
+        self.confidence_threshold = confidence_threshold
+        self.nms_threshold = nms_threshold
+        self.__projection_area_coordinates = projection_area_coordinates
+        self.__projection_area_resolution = projection_area_resolution
+
+        self.location_detection_tasks = queue.Queue(maxsize=1)
+
+    def run(self):
+        detection_model = cv.dnn_DetectionModel(self.__detection_model_weights_file_path,
+                                                self.__detection_model_configuration_file_path)
+        detection_model.setPreferableBackend(cv.dnn.DNN_BACKEND_CUDA)
+        detection_model.setPreferableTarget(cv.dnn.DNN_TARGET_CUDA)
+        detection_model.setInputParams(self.__detection_model_scale, self.__detection_model_size)
+
+        while True:
+            camera_frame = self.location_detection_tasks.get()
+
+            start_detection_time = time.time()
+            class_ids, confidences, boxes = detection_model.detect(camera_frame, self.confidence_threshold,
+                                                                   self.nms_threshold)
+            end_detection_time = time.time()
+
+            result_class_ids = []
+            result_confidences = []
+            result_boxes = []
+            result_center_points = []
+            result_points_ext = []
+
+            # Get warp matrix
+            pts1 = np.float32(self.__projection_area_coordinates)
+            pts2 = np.float32([[self.__projection_area_resolution[0], 0], self.__projection_area_resolution,
+                               [0, self.__projection_area_resolution[1]], [0, 0]])
+            matrix = cv.getPerspectiveTransform(pts1, pts2)
+
+            poly = Polygon(self.__projection_area_coordinates)
+            for (class_id, confidence, box) in zip(class_ids, confidences, boxes):
+                if class_id[0] != self.__person_class_id:
+                    continue
+
+                box_bottom_edge_center = (box[0] + box[2] / 2, box[1] + box[3])
+                point = Point(box_bottom_edge_center)
+                if point.within(poly):
+                    result_class_ids.append(class_id)
+                    result_confidences.append(confidence)
+                    result_boxes.append(box)
+                    result_center_points.append(box_bottom_edge_center)
+                    px = (matrix[0][0] * box_bottom_edge_center[0] + matrix[0][1] * box_bottom_edge_center[1] +
+                          matrix[0][2]) / (
+                             (matrix[2][0] * box_bottom_edge_center[0] + matrix[2][1] * box_bottom_edge_center[1] +
+                              matrix[2][2]))
+                    py = (matrix[1][0] * box_bottom_edge_center[0] + matrix[1][1] * box_bottom_edge_center[1] +
+                          matrix[1][2]) / (
+                             (matrix[2][0] * box_bottom_edge_center[0] + matrix[2][1] * box_bottom_edge_center[1] +
+                              matrix[2][2]))
+                    result_points_ext.append((px, py))
+
+            camera_frame_warped = cv.warpPerspective(camera_frame, matrix, self.__projection_area_resolution)
+            self.camera_frame_processed.emit(
+                (camera_frame, camera_frame_warped, result_confidences, result_boxes, matrix, result_center_points, result_points_ext))
+
+            self.location_detection_tasks.task_done()
+
+
+class PersonLocationDetectionService:
+
     def __init__(self):
-        self.__detection_model = None
+        self.location_detection_thread = None
 
-    def initialize_detection_model(self, weights_file_path, configuration_file_path, scale, size):
-        self.__detection_model = cv.dnn_DetectionModel(weights_file_path, configuration_file_path)
-        self.__detection_model.setPreferableBackend(cv.dnn.DNN_BACKEND_CUDA)
-        self.__detection_model.setPreferableTarget(cv.dnn.DNN_TARGET_CUDA)
-        self.__detection_model.setInputParams(scale, size)
+    def start_person_location_detection(self, weights_file_path, configuration_file_path, scale, size, person_class_id,
+                                        confidence_threshold,
+                                        nms_threshold, projection_area_coordinates, projection_area_resolution,
+                                        camera_frame_processed_slot,
+                                        camera_service):
+        self.location_detection_thread = PersonLocationDetectionThread(weights_file_path, configuration_file_path,
+                                                                       scale,
+                                                                       size, person_class_id, confidence_threshold,
+                                                                       nms_threshold,
+                                                                       projection_area_coordinates,
+                                                                       projection_area_resolution)
+        camera_service.detection_started(self.location_detection_thread.location_detection_tasks)
+        self.location_detection_thread.camera_frame_processed.connect(camera_frame_processed_slot)
 
-    def detect_objects(self, frame, conf_threshold, nms_threshold):
-        return self.__detection_model.detect(frame, conf_threshold, nms_threshold)
+        self.location_detection_thread.start()
+
+    def update_confidence_threshold(self, updated_confidence_threshold):
+        if self.location_detection_thread is not None:
+            self.location_detection_thread.confidence_threshold = updated_confidence_threshold
+
+    def update_nms_threshold(self, updated_nms_threshold):
+        if self.location_detection_thread is not None:
+            self.location_detection_thread.nms_threshold = updated_nms_threshold
