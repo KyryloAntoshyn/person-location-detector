@@ -19,7 +19,7 @@ else
 fi
 
 cleanup () {
-# https://stackoverflow.com/questions/226703/how-do-i-prompt-for-yes-no-cancel-input-in-a-linux-shell-script
+	# https://stackoverflow.com/questions/226703/how-do-i-prompt-for-yes-no-cancel-input-in-a-linux-shell-script
     while true ; do
         echo "Do you wish to remove temporary build files in /tmp/build_opencv ? "
         if ! [[ "$1" -eq "--test-warning" ]] ; then
