@@ -202,7 +202,8 @@ class PersonLocationDetectionThread(QtCore.QThread):
 
             camera_frame_warped = cv.warpPerspective(camera_frame, matrix, self.__projection_area_resolution)
             self.camera_frame_processed.emit(
-                (camera_frame, camera_frame_warped, result_confidences, result_boxes, matrix, result_center_points, result_points_ext))
+                (camera_frame, camera_frame_warped, result_confidences, result_boxes, matrix, result_center_points,
+                 result_points_ext))
 
             self.location_detection_tasks.task_done()
 

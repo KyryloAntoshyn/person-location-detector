@@ -4,11 +4,9 @@
         <file alias="roboto_regular">resources/fonts/roboto_regular.ttf</file>
     </qresource>
     <qresource prefix="/icons">
-        <file alias="person_detection">resources/icons/person_detection.png</file>
+        <file alias="application_logo">resources/icons/application_logo.png</file>
         <file alias="menu">resources/icons/menu.png</file>
         <file alias="camera">resources/icons/camera.png</file>
-        <file alias="neural_network">resources/icons/neural_network.png</file>
-        <file alias="settings">resources/icons/settings.png</file>
         <file alias="information">resources/icons/information.png</file>
     </qresource>
 </RCC>

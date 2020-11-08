@@ -1,12 +1,9 @@
 import services
-from dependency_injector.wiring import Provide
-from dependency_injection import DependencyInjectionContainer
 from PyQt5 import QtWidgets, QtCore, QtGui
 import numpy as np
 import os
 import helpers
 import constants
-import cv2 as cv
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -16,15 +13,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
     MENU_WIDGET_MIN_AND_MAX_WIDTHS = (38, 255)
 
-    def __init__(self,
-                 camera_service: services.CameraService = Provide[
-                     DependencyInjectionContainer.camera_service_provider]):
+    def __init__(self):
         """
         Initializes widgets, layouts and styles on the main window.
         """
         super(MainWindow, self).__init__()
 
-        self.__camera_service = camera_service
+        self.__camera_service = services.CameraService()
+        self.__person_location_detection_service = services.PersonLocationDetectionService()
 
         self.central_widget = QtWidgets.QWidget(self)
         self.central_widget_layout = QtWidgets.QHBoxLayout(self.central_widget)
@@ -47,7 +43,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setWindowState(QtCore.Qt.WindowMaximized)
         self.setFixedSize(QtWidgets.QApplication.primaryScreen().availableGeometry().size())
 
-        self.setWindowIcon(QtGui.QIcon(":/icons/person_detection"))
+        self.setWindowIcon(QtGui.QIcon(":/icons/application_logo"))
         self.setWindowTitle(constants.APPLICATION_NAME)
 
         frame_geometry = self.frameGeometry()
@@ -111,9 +107,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.menu_list_widget.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         self.menu_list_widget.setIconSize(QtCore.QSize(32, 32))
 
-        menu_items = [(":/icons/camera", "Detection", DetectionWidget()),
-                      (":/icons/neural_network", "Detection models", DetectionModelsWidget()),
-                      (":/icons/settings", "Settings", SettingsWidget()),
+        menu_items = [(":/icons/camera", "Detection",
+                       DetectionWidget(self.__camera_service, self.__person_location_detection_service)),
                       (":/icons/information", "About", AboutWidget())]
         for menu_item_icon, menu_item_name, menu_item_widget in menu_items:
             menu_item = QtWidgets.QListWidgetItem(QtGui.QIcon(menu_item_icon), menu_item_name, self.menu_list_widget)
@@ -238,14 +233,11 @@ class DetectionWidget(QtWidgets.QWidget):
         "640×480": (640, 480)
     }
 
-    def __init__(self,
-                 camera_service: services.CameraService = Provide[DependencyInjectionContainer.camera_service_provider],
-                 detection_service: services.PersonLocationDetectionService = Provide[
-                     DependencyInjectionContainer.detection_service_provider]):
+    def __init__(self, camera_service, person_location_detection_service):
         super(DetectionWidget, self).__init__()
 
         self.__camera_service = camera_service
-        self.__detection_service = detection_service
+        self.__person_location_detection_service = person_location_detection_service
 
         self.detection_widget_layout = QtWidgets.QGridLayout(self)
         self.detection_widget_layout.setRowStretch(0, 1)
@@ -632,11 +624,11 @@ class DetectionWidget(QtWidgets.QWidget):
     def slider_value_changed(self, value):
         if self.sender() == self.confidence_threshold_slider:
             updated_confidence_threshold = value * 0.01
-            self.__detection_service.update_confidence_threshold(updated_confidence_threshold)
+            self.__person_location_detection_service.update_confidence_threshold(updated_confidence_threshold)
             self.confidence_threshold_label.setText(str(round(updated_confidence_threshold, 2)))
         else:
             updated_nms_threshold = value * 0.01
-            self.__detection_service.update_nms_threshold(updated_nms_threshold)
+            self.__person_location_detection_service.update_nms_threshold(updated_nms_threshold)
             self.nms_threshold_label.setText(str(round(updated_nms_threshold, 2)))
 
     @QtCore.pyqtSlot()
@@ -653,7 +645,7 @@ class DetectionWidget(QtWidgets.QWidget):
         CONVERTED = helpers.convert_points_to_another_resolution(polygon_point_coordinates, current_resolution,
                                                                  result_resolution)
 
-        self.__detection_service.start_person_location_detection(
+        self.__person_location_detection_service.start_person_location_detection(
             self.select_detection_model_weights_file_line_edit.text(),
             self.select_detection_model_configuration_file_line_edit.text(),
             1.0 / 255, (416, 416),
@@ -704,7 +696,6 @@ class DetectionWidget(QtWidgets.QWidget):
         self.location_of_detected_persons.setPixmap(pixmap.scaled(
             self.location_of_detected_persons.size(), QtCore.Qt.KeepAspectRatio))
 
-
     @QtCore.pyqtSlot()
     def stop_detection(self):
         self.__camera_service.update_camera_frame_read_slot(self.camera_frame_read)
@@ -721,24 +712,6 @@ class DetectionWidget(QtWidgets.QWidget):
         self.select_detection_model_configuration_file_push_button.setEnabled(is_enabled)
         self.select_detection_model_configuration_file_line_edit.setEnabled(is_enabled)
         self.person_class_id_spin_box.setEnabled(is_enabled)
-
-
-class DetectionModelsWidget(QtWidgets.QWidget):
-    def __init__(self):
-        super(DetectionModelsWidget, self).__init__()
-        self.init_ui()
-
-    def init_ui(self):
-        lbl = QtWidgets.QLabel("Detection models widget", self)
-
-
-class SettingsWidget(QtWidgets.QWidget):
-    def __init__(self):
-        super(SettingsWidget, self).__init__()
-        self.init_ui()
-
-    def init_ui(self):
-        lbl = QtWidgets.QLabel("Settings widget", self)
 
 
 class AboutWidget(QtWidgets.QWidget):
