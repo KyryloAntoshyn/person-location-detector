@@ -562,6 +562,16 @@ class DetectionWidget(QtWidgets.QWidget):
             self.change_detection_settings_widgets_state(False)
             self.projection_area_widget.clear_projection_area()
 
+    @QtCore.pyqtSlot()
+    def projection_area_set(self):
+        self.change_detection_settings_widgets_state(True)
+
+        if self.select_detection_model_weights_file_line_edit.text() == "" or \
+                self.select_detection_model_configuration_file_line_edit.text() == "":
+            self.start_detection_push_button.setEnabled(False)
+
+        self.stop_detection_push_button.setEnabled(False)
+
     @QtCore.pyqtSlot(str)
     def resolutions_combo_box_selection_changed(self, current_text):
         if self.sender() == self.projection_area_resolutions_combo_box:
@@ -593,22 +603,13 @@ class DetectionWidget(QtWidgets.QWidget):
         self.stop_detection_push_button.setEnabled(is_enabled)
 
     @QtCore.pyqtSlot()
-    def projection_area_set(self):
-        self.change_detection_settings_widgets_state(True)
-
-        if self.select_detection_model_weights_file_line_edit.text() == "" or self.select_detection_model_configuration_file_line_edit.text() == "":
-            self.start_detection_push_button.setEnabled(False)
-
-        self.stop_detection_push_button.setEnabled(False)
-
-    @QtCore.pyqtSlot()
     def select_detection_model_weights_or_configuration(self):
         if self.sender() == self.select_detection_model_weights_file_push_button:
             weights_file_path = QtWidgets.QFileDialog.getOpenFileName(self, "Select detection model weights file",
                                                                       os.path.join(
                                                                           os.path.dirname(os.path.abspath(__file__)),
                                                                           "detection_models"), "Weights (*.weights)")[0]
-            if weights_file_path != '':
+            if weights_file_path != "":
                 self.select_detection_model_weights_file_line_edit.setText(weights_file_path)
 
                 if self.select_detection_model_configuration_file_line_edit.text() != "":
@@ -619,7 +620,7 @@ class DetectionWidget(QtWidgets.QWidget):
                                                       os.path.join(
                                                           os.path.dirname(os.path.abspath(__file__)),
                                                           "detection_models"), "Configuration (*.cfg)")[0]
-            if configuration_file_path != '':
+            if configuration_file_path != "":
                 self.select_detection_model_configuration_file_line_edit.setText(configuration_file_path)
 
                 if self.select_detection_model_weights_file_line_edit.text() != "":
@@ -638,38 +639,53 @@ class DetectionWidget(QtWidgets.QWidget):
 
     @QtCore.pyqtSlot()
     def start_detection(self):
+        # Get projection area resolution
         self.selected_projection_area_resolution = self.PROJECTION_AREA_RESOLUTIONS.get(
             self.projection_area_resolutions_combo_box.currentText(), None)
         if self.selected_projection_area_resolution is None:
-            self.selected_projection_area_resolution = self.projection_area_width_spin_box.value(), self.projection_area_height_spin_box.value()
+            self.selected_projection_area_resolution = self.projection_area_width_spin_box.value(), \
+                                                       self.projection_area_height_spin_box.value()
 
-        polygon_point_coordinates = helpers.convert_polygon_points_to_coordinates_list(
+        # Get projection area coordinates
+        projection_area_polygon_coordinates = helpers.convert_polygon_points_to_coordinates_list(
             self.projection_area_widget.get_projection_area_polygon())
-        current_resolution = self.projection_area_camera_stream_label.pixmap().width(), \
-                             self.projection_area_camera_stream_label.pixmap().height()
-        CONVERTED = helpers.convert_points_to_another_resolution(polygon_point_coordinates, current_resolution,
-                                                                 self.camera_frame_resolution)
+        current_resolution = self.projection_area_camera_stream_label.pixmap().width(), self.projection_area_camera_stream_label.pixmap().height()
+        projection_area_coordinates = helpers.convert_points_to_another_resolution(projection_area_polygon_coordinates,
+                                                                                   current_resolution,
+                                                                                   self.camera_frame_resolution)
 
+        # Disconnect camera_frame_read slot and start person location detection
         self.__camera_service.disconnect_camera_frame_read_slot(self.camera_frame_read)
         self.__person_location_detection_service.start_person_location_detection(
             self.select_detection_model_weights_file_line_edit.text(),
             self.select_detection_model_configuration_file_line_edit.text(),
-            1.0 / 255, (416, 416),
+            1.0 / 255, (416, 416),  # Hardcoded for now
             self.person_class_id_spin_box.value(),
             self.confidence_threshold_slider.value() * 0.01,
             self.nms_threshold_slider.value() * 0.01,
-            CONVERTED, self.selected_projection_area_resolution,
+            projection_area_coordinates,
+            self.selected_projection_area_resolution,
             self.camera_frame_processed,
             self.__camera_service)
 
+        # Update UI
         self.start_detection_push_button.setEnabled(False)
         self.stop_detection_push_button.setEnabled(True)
         self.change_camera_and_projection_area_settings_group_boxes_state(False)
         self.location_of_detected_persons.show()
 
+    def change_camera_and_projection_area_settings_group_boxes_state(self, is_enabled):
+        self.camera_settings_group_box.setEnabled(is_enabled)
+        self.projection_area_settings_group_box.setEnabled(is_enabled)
+        self.select_detection_model_weights_file_push_button.setEnabled(is_enabled)
+        self.select_detection_model_weights_file_line_edit.setEnabled(is_enabled)
+        self.select_detection_model_configuration_file_push_button.setEnabled(is_enabled)
+        self.select_detection_model_configuration_file_line_edit.setEnabled(is_enabled)
+        self.person_class_id_spin_box.setEnabled(is_enabled)
+
     @QtCore.pyqtSlot(tuple)
     def camera_frame_processed(self, results):
-        camera_frame, camera_frame_warped, confidences, boxes, matrix, bbox_center_points, person_points = results
+        camera_frame, camera_frame_warped, confidences, boxes, bbox_center_points, person_points = results
 
         # Draw detected persons
         pixmap = helpers.convert_opencv_image_to_pixmap(camera_frame)
@@ -677,19 +693,17 @@ class DetectionWidget(QtWidgets.QWidget):
         painter_1.begin(pixmap)
         painter_1.setRenderHint(QtGui.QPainter.Antialiasing)
         painter_1.setPen(QtGui.QPen(QtGui.QColor(0, 255, 0), 5))
-
         for (confidence, box, center_point) in zip(confidences, boxes, bbox_center_points):
             painter_1.drawRect(box[0], box[1], box[2], box[3])
             painter_1.drawEllipse(center_point[0], center_point[1], 5, 5)
             painter_1.drawText(box[0], box[1] - 10, "Person: %.2f" % confidence)
-
         painter_1.end()
 
         # painter.drawText(0, 15, "FPS: %.2f" % (1 / (end_detection_time - start_detection_time)))
         self.projection_area_camera_stream_label.setPixmap(pixmap.scaled(
             self.projection_area_camera_stream_label.size(), QtCore.Qt.KeepAspectRatio))
 
-        # Draw persons points
+        # Draw location of detected persons
         pixmap = helpers.convert_opencv_image_to_pixmap(camera_frame_warped)
         painter_2 = QtGui.QPainter()
         painter_2.begin(pixmap)
@@ -710,15 +724,6 @@ class DetectionWidget(QtWidgets.QWidget):
         self.start_detection_push_button.setEnabled(True)
         self.change_camera_and_projection_area_settings_group_boxes_state(True)
         self.location_of_detected_persons.hide()
-
-    def change_camera_and_projection_area_settings_group_boxes_state(self, is_enabled):
-        self.camera_settings_group_box.setEnabled(is_enabled)
-        self.projection_area_settings_group_box.setEnabled(is_enabled)
-        self.select_detection_model_weights_file_push_button.setEnabled(is_enabled)
-        self.select_detection_model_weights_file_line_edit.setEnabled(is_enabled)
-        self.select_detection_model_configuration_file_push_button.setEnabled(is_enabled)
-        self.select_detection_model_configuration_file_line_edit.setEnabled(is_enabled)
-        self.person_class_id_spin_box.setEnabled(is_enabled)
 
 
 class AboutWidget(QtWidgets.QWidget):
