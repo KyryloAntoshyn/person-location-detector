@@ -147,8 +147,6 @@ class CameraService:
         if self.__camera_stream_reader_thread is None:
             raise Exception("You need to start camera stream reading first!")
 
-        self.__camera_stream_reader_thread.camera_initialized.disconnect()
-        self.__camera_stream_reader_thread.camera_frame_read.disconnect()
         self.__camera_stream_reader_thread = None
 
     def stop_camera_stream_reading(self):
