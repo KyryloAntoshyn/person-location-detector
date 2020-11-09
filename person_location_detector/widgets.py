@@ -151,7 +151,7 @@ class MainWindow(QtWidgets.QMainWindow):
                                                               QtWidgets.QMessageBox.No | QtWidgets.QMessageBox.Yes,
                                                               QtWidgets.QMessageBox.No)
         if exit_question_result == QtWidgets.QMessageBox.Yes:
-            if self.__camera_service.is_camera_stream_reading_active():
+            if self.__camera_service.is_camera_stream_reading_running():
                 self.__camera_service.stop_camera_stream_reading()
             event.accept()
         else:
@@ -468,6 +468,7 @@ class DetectionWidget(QtWidgets.QWidget):
         self.settings_layout.addStretch()
 
         self.selected_projection_area_resolution = None
+        self.camera_frame_resolution = None
 
     @QtCore.pyqtSlot()
     def start_or_stop_camera_stream(self):
@@ -480,10 +481,10 @@ class DetectionWidget(QtWidgets.QWidget):
             self.projection_area_camera_stream_label.setText("Camera is initializing...")
             self.projection_area_camera_stream_label.show()
 
+            # Start camera stream reading
             camera_index = self.camera_indexes_combo_box.currentIndex()
-            if self.camera_resolutions_combo_box.currentText() in self.CAMERA_RESOLUTIONS:
-                camera_resolution = self.CAMERA_RESOLUTIONS[self.camera_resolutions_combo_box.currentText()]
-            else:
+            camera_resolution = self.CAMERA_RESOLUTIONS.get(self.camera_resolutions_combo_box.currentText(), None)
+            if camera_resolution is None:
                 camera_resolution = (self.camera_width_spin_box.value(), self.camera_height_spin_box.value())
             self.__camera_service.start_camera_stream_reading(camera_index, camera_resolution, self.camera_initialized,
                                                               self.update_first_frame)
@@ -493,6 +494,7 @@ class DetectionWidget(QtWidgets.QWidget):
             self.change_detection_settings_widgets_state(False)
             self.projection_area_widget.clear_projection_area()
 
+            # Stop camera stream reading
             self.__camera_service.stop_camera_stream_reading()
 
     @QtCore.pyqtSlot(bool)
@@ -501,21 +503,13 @@ class DetectionWidget(QtWidgets.QWidget):
             self.stop_camera_stream_push_button.setEnabled(True)
             self.change_projection_area_settings_widgets_state(True)
         else:
-            self.__camera_service.stop_camera_stream_reading()
+            # Cleans camera stream reading resources
+            self.__camera_service.clean_camera_stream_reading_resources()
+
             self.camera_settings_and_stream_initial_state()
             QtWidgets.QMessageBox.critical(self, "Error",
                                            "An error occurred during camera initialization!"
                                            "Probably there is no connected camera with such index.")
-
-    def camera_settings_and_stream_initial_state(self):
-        self.camera_indexes_combo_box.setEnabled(True)
-        self.camera_resolutions_combo_box.setEnabled(True)
-        if self.camera_resolutions_combo_box.currentText() not in self.CAMERA_RESOLUTIONS:
-            self.camera_width_spin_box.setEnabled(True)
-            self.camera_height_spin_box.setEnabled(True)
-        self.start_camera_stream_push_button.setEnabled(True)
-        self.stop_camera_stream_push_button.setEnabled(False)
-        self.projection_area_camera_stream_label.hide()
 
     @QtCore.pyqtSlot(np.ndarray)
     def update_first_frame(self, camera_frame):
@@ -528,9 +522,26 @@ class DetectionWidget(QtWidgets.QWidget):
         self.projection_area_widget.setFixedSize(self.projection_area_camera_stream_label.pixmap().size())
         self.projection_area_widget.projection_area_set.connect(self.projection_area_set)
         self.camera_stream_widgets_layout.addWidget(self.projection_area_widget, 1, 0, alignment=QtCore.Qt.AlignHCenter)
-        self.camera_frame_resolution = camera_frame
+        self.camera_frame_resolution = (camera_frame.shape[1], camera_frame.shape[0])  # Save actual camera resolution
 
-        self.__camera_service.update_camera_frame_read_slot(self.camera_frame_read)
+        self.__camera_service.update_camera_frame_read_slot(self.update_first_frame,
+                                                            self.camera_frame_read)  # Change camera stream reading slot
+
+    @QtCore.pyqtSlot(np.ndarray)
+    def camera_frame_read(self, camera_frame):
+        self.projection_area_camera_stream_label.setPixmap(
+            helpers.convert_opencv_image_to_pixmap(camera_frame).scaled(self.projection_area_camera_stream_label.size(),
+                                                                        QtCore.Qt.KeepAspectRatio))
+
+    def camera_settings_and_stream_initial_state(self):
+        self.camera_indexes_combo_box.setEnabled(True)
+        self.camera_resolutions_combo_box.setEnabled(True)
+        if self.camera_resolutions_combo_box.currentText() not in self.CAMERA_RESOLUTIONS:
+            self.camera_width_spin_box.setEnabled(True)
+            self.camera_height_spin_box.setEnabled(True)
+        self.start_camera_stream_push_button.setEnabled(True)
+        self.stop_camera_stream_push_button.setEnabled(False)
+        self.projection_area_camera_stream_label.hide()
 
     def change_projection_area_settings_widgets_state(self, is_enabled):
         self.set_projection_area_push_button.setEnabled(is_enabled)
@@ -590,12 +601,6 @@ class DetectionWidget(QtWidgets.QWidget):
 
         self.stop_detection_push_button.setEnabled(False)
 
-    @QtCore.pyqtSlot(np.ndarray)
-    def camera_frame_read(self, camera_frame):
-        self.projection_area_camera_stream_label.setPixmap(
-            helpers.convert_opencv_image_to_pixmap(camera_frame).scaled(self.projection_area_camera_stream_label.size(),
-                                                                        QtCore.Qt.KeepAspectRatio))
-
     @QtCore.pyqtSlot()
     def select_detection_model_weights_or_configuration(self):
         if self.sender() == self.select_detection_model_weights_file_push_button:
@@ -640,11 +645,12 @@ class DetectionWidget(QtWidgets.QWidget):
 
         polygon_point_coordinates = helpers.convert_polygon_points_to_coordinates_list(
             self.projection_area_widget.get_projection_area_polygon())
-        current_resolution = self.projection_area_camera_stream_label.pixmap().width(), self.projection_area_camera_stream_label.pixmap().height()
-        result_resolution = (self.camera_frame_resolution.shape[1], self.camera_frame_resolution.shape[0])
+        current_resolution = self.projection_area_camera_stream_label.pixmap().width(), \
+                             self.projection_area_camera_stream_label.pixmap().height()
         CONVERTED = helpers.convert_points_to_another_resolution(polygon_point_coordinates, current_resolution,
-                                                                 result_resolution)
+                                                                 self.camera_frame_resolution)
 
+        self.__camera_service.disconnect_camera_frame_read_slot(self.camera_frame_read)
         self.__person_location_detection_service.start_person_location_detection(
             self.select_detection_model_weights_file_line_edit.text(),
             self.select_detection_model_configuration_file_line_edit.text(),
@@ -698,7 +704,8 @@ class DetectionWidget(QtWidgets.QWidget):
 
     @QtCore.pyqtSlot()
     def stop_detection(self):
-        self.__camera_service.update_camera_frame_read_slot(self.camera_frame_read)
+        self.__camera_service.connect_camera_frame_read_slot(self.camera_frame_read)
+
         self.stop_detection_push_button.setEnabled(False)
         self.start_detection_push_button.setEnabled(True)
         self.change_camera_and_projection_area_settings_group_boxes_state(True)

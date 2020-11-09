@@ -1,9 +1,9 @@
-from PyQt5 import QtCore
 import numpy as np
 import cv2 as cv
-import time
-from shapely.geometry import Point, Polygon
 import queue
+import time
+from PyQt5 import QtCore
+from shapely.geometry import Point, Polygon
 
 
 class CameraStreamReaderThread(QtCore.QThread):
@@ -16,55 +16,56 @@ class CameraStreamReaderThread(QtCore.QThread):
 
     def __init__(self, camera_index, camera_resolution):
         """
-        Initializes thread: sets camera index, resolution and "active" thread flag.
+        Initializes thread.
 
         :param camera_index: index of the connected camera
         :param camera_resolution: resolution of the connected camera
         """
         super(CameraStreamReaderThread, self).__init__()
 
-        self.__camera_index = camera_index
-        self.__camera_resolution = camera_resolution
-        self.__is_active = True
-        self.__is_detection_active = False
+        self.camera_index = camera_index
+        self.camera_resolution = camera_resolution
+        self.is_running = False
+        self.video_capture = None
+        self.is_person_location_detection_running = False
+        self.camera_frames_to_process = None
 
     def run(self):
         """
-        Runs thread: initializes connected camera, emits initialization status signal, captures camera frames and emits
-        signals with current read frame.
+        Runs thread: initializes connected camera and captures its frames. Thread can switch its state and start putting
+        camera frames into the queue in order for person location detection thread to process them.
         """
-        video_capture = cv.VideoCapture(self.__camera_index)
-        if not video_capture.isOpened():
+        self.is_running = True
+
+        self.video_capture = cv.VideoCapture(self.camera_index)
+        if not self.video_capture.isOpened():
             self.camera_initialized.emit(False)
-            self.__is_active = False
+            self.is_running = False
+            self.video_capture = None
             return
 
-        video_capture.set(cv.CAP_PROP_FRAME_WIDTH, self.__camera_resolution[0])
-        video_capture.set(cv.CAP_PROP_FRAME_HEIGHT, self.__camera_resolution[1])
+        self.video_capture.set(cv.CAP_PROP_FRAME_WIDTH, self.camera_resolution[0])
+        self.video_capture.set(cv.CAP_PROP_FRAME_HEIGHT, self.camera_resolution[1])
         self.camera_initialized.emit(True)
 
-        while self.__is_active:
+        while self.is_running:
+            is_success_frame_read, frame = self.video_capture.read()
+            if is_success_frame_read:
+                self.camera_frame_read.emit(frame)
+                if self.is_person_location_detection_running:
+                    self.camera_frames_to_process.put(frame)
 
-            if self.__is_detection_active:
-                is_success_frame_read, frame = video_capture.read()
-                if is_success_frame_read:
-                    self.tasks.put(frame)
-            else:
-                is_success_frame_read, frame = video_capture.read()
-                if is_success_frame_read:
-                    self.camera_frame_read.emit(frame)
-
-        video_capture.release()
+        self.video_capture.release()
 
     def stop(self):
         """
-        Stops thread: releases connected camera and waits for thread exit.
+        Stops thread: returns thread to the initial state (before running).
         """
-        self.__is_active = False
+        self.is_running = False
+        self.is_person_location_detection_running = False
         self.wait()
-
-    def detection_state_changed(self, is_detection_active):
-        self.__is_detection_active = is_detection_active
+        self.video_capture = None
+        self.camera_frames_to_process = None
 
 
 class CameraService:
@@ -74,21 +75,29 @@ class CameraService:
 
     def __init__(self):
         """
-        Initializes service: sets camera stream reader thread.
+        Initializes service.
         """
         self.__camera_stream_reader_thread = None
+
+    def is_camera_stream_reading_running(self):
+        """
+        Returns whether camera stream reading is running (whether camera stream reader thread has been started).
+
+        :return: whether camera stream reading is running
+        """
+        return self.__camera_stream_reader_thread is not None and self.__camera_stream_reader_thread.is_running
 
     def start_camera_stream_reading(self, camera_index, camera_resolution, camera_initialized_slot,
                                     camera_frame_read_slot):
         """
-        Creates camera stream reader thread, connects slots with signals and starts thread execution.
+        Creates camera stream reader thread, connects signals with slots and starts thread execution.
 
         :param camera_index: index of the connected camera
         :param camera_resolution: resolution of the connected camera
         :param camera_initialized_slot: slot that is called when the camera has been initialized
         :param camera_frame_read_slot: slot that is called when the camera frame has been read
         """
-        if self.is_camera_stream_reading_active():
+        if self.is_camera_stream_reading_running():
             raise Exception("You need to stop camera stream reading first!")
 
         self.__camera_stream_reader_thread = CameraStreamReaderThread(camera_index, camera_resolution)
@@ -96,39 +105,81 @@ class CameraService:
         self.__camera_stream_reader_thread.camera_frame_read.connect(camera_frame_read_slot)
         self.__camera_stream_reader_thread.start()
 
-    def update_camera_frame_read_slot(self, camera_frame_read_slot):
+    def update_camera_frame_read_slot(self, current_camera_frame_read_slot, updated_camera_frame_read_slot):
         """
         Updates "camera frame read" slot.
 
-        :param camera_frame_read_slot: slot that is called when the camera frame has been read
+        :param current_camera_frame_read_slot: current slot that is called when the camera frame has been read
+        :param updated_camera_frame_read_slot: updated slot that is called when the camera frame has been read
         """
-        if not self.is_camera_stream_reading_active():
+        if not self.is_camera_stream_reading_running():
             raise Exception("You need to start camera stream reading first!")
 
-        self.__camera_stream_reader_thread.camera_frame_read.disconnect()
+        self.__camera_stream_reader_thread.camera_frame_read.disconnect(current_camera_frame_read_slot)
+        self.__camera_stream_reader_thread.camera_frame_read.connect(updated_camera_frame_read_slot)
+
+    def disconnect_camera_frame_read_slot(self, camera_frame_read_slot):
+        """
+        Disconnects "camera frame read" slot.
+
+        :param camera_frame_read_slot: slot that is called when the camera frame has been read
+        """
+        if not self.is_camera_stream_reading_running():
+            raise Exception("You need to start camera stream reading first!")
+
+        self.__camera_stream_reader_thread.camera_frame_read.disconnect(camera_frame_read_slot)
+
+    def connect_camera_frame_read_slot(self, camera_frame_read_slot):
+        """
+        Connects "camera frame read" slot.
+
+        :param camera_frame_read_slot: slot that is called when the camera frame has been read
+        """
+        if not self.is_camera_stream_reading_running():
+            raise Exception("You need to start camera stream reading first!")
+
         self.__camera_stream_reader_thread.camera_frame_read.connect(camera_frame_read_slot)
+
+    def clean_camera_stream_reading_resources(self):
+        """
+        Cleans camera stream reader thread resources.
+        """
+        if self.__camera_stream_reader_thread is None:
+            raise Exception("You need to start camera stream reading first!")
+
+        self.__camera_stream_reader_thread.camera_initialized.disconnect()
+        self.__camera_stream_reader_thread.camera_frame_read.disconnect()
+        self.__camera_stream_reader_thread = None
 
     def stop_camera_stream_reading(self):
         """
-        Stops camera stream reader thread execution.
+        Stops camera stream reader thread execution and cleans its resources.
         """
-        if not self.is_camera_stream_reading_active():
+        if not self.is_camera_stream_reading_running():
             raise Exception("You need to start camera stream reading first!")
 
         self.__camera_stream_reader_thread.stop()
-        self.__camera_stream_reader_thread = None
+        self.clean_camera_stream_reading_resources()
 
-    def is_camera_stream_reading_active(self):
+    def switch_camera_stream_reading_state(self, is_person_location_detection, camera_frames_to_process=None):
         """
-        Returns whether camera stream reading is active (whether camera stream reader thread has been started).
+        Switches camera stream reading state from plain reading to reading camera frames and putting them into the
+        queue in order for person location detection thread to process them and vice versa.
 
-        :return: whether camera stream reading is active
+        :param is_person_location_detection: whether person location detection is running
+        :param camera_frames_to_process: camera frames to process queue
         """
-        return self.__camera_stream_reader_thread is not None
+        if not self.is_camera_stream_reading_running():
+            raise Exception("You need to start camera stream reading first!")
 
-    def detection_started(self, tasks):
-        self.__camera_stream_reader_thread.tasks = tasks
-        self.__camera_stream_reader_thread.detection_state_changed(True)
+        if is_person_location_detection:
+            if camera_frames_to_process is None:
+                raise Exception("Camera frames to process queue should be initialized!")
+
+            self.__camera_stream_reader_thread.camera_frames_to_process = camera_frames_to_process
+            self.__camera_stream_reader_thread.is_person_location_detection_running = True
+        else:
+            self.__camera_stream_reader_thread.is_person_location_detection_running = False
 
 
 class PersonLocationDetectionThread(QtCore.QThread):
@@ -224,7 +275,7 @@ class PersonLocationDetectionService:
                                                                        nms_threshold,
                                                                        projection_area_coordinates,
                                                                        projection_area_resolution)
-        camera_service.detection_started(self.location_detection_thread.location_detection_tasks)
+        camera_service.switch_camera_stream_reading_state(True, self.location_detection_thread.location_detection_tasks)
         self.location_detection_thread.camera_frame_processed.connect(camera_frame_processed_slot)
 
         self.location_detection_thread.start()
