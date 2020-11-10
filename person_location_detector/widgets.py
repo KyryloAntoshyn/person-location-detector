@@ -195,8 +195,8 @@ class ProjectionAreaWidget(QtWidgets.QWidget):
 
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
-        painter.setPen(QtGui.QPen(QtGui.QColor(0, 255, 0), 5))
-        painter.setBrush(QtGui.QBrush(QtGui.QColor(0, 255, 0)))
+        painter.setPen(QtGui.QPen(QtGui.QColor(0, 229, 255), 5))
+        painter.setBrush(QtGui.QBrush(QtGui.QColor(0, 229, 255)))
 
         current_projection_area_point = self.__projection_area_polygon.point(0)
         painter.drawEllipse(current_projection_area_point, 5, 5)
@@ -261,7 +261,10 @@ class DetectionWidget(QtWidgets.QWidget):
         self.projection_area_camera_stream_label.hide()
         self.camera_stream_widgets_layout.addWidget(self.projection_area_camera_stream_label, 1, 0)
 
-        self.projection_area_widget = None
+        self.projection_area_widget = ProjectionAreaWidget(self)
+        self.projection_area_widget.hide()
+        self.projection_area_widget.projection_area_set.connect(self.projection_area_set)
+        self.camera_stream_widgets_layout.addWidget(self.projection_area_widget, 1, 0, alignment=QtCore.Qt.AlignHCenter)
 
         self.detection_widget_layout.addLayout(self.camera_stream_widgets_layout, 0, 0, 1, 1)
 
@@ -469,8 +472,18 @@ class DetectionWidget(QtWidgets.QWidget):
 
         self.settings_layout.addStretch()
 
-        self.selected_projection_area_resolution = None
         self.camera_frame_resolution = None
+        self.selected_projection_area_resolution = None
+
+        # Detected persons painter
+        self.detected_persons_painter = QtGui.QPainter()
+        self.detected_persons_pen = QtGui.QPen(QtGui.QColor(118, 255, 3), 10)
+        self.detected_persons_painter_font = QtGui.QFont("Roboto", 32)
+
+        # Detected persons locations
+        self.detected_persons_locations_painter = QtGui.QPainter()
+        self.detected_persons_locations_brush = QtGui.QBrush(QtGui.QColor(118, 255, 3))
+        self.detected_persons_locations_ellipse_size = 50
 
     @QtCore.pyqtSlot()
     def start_or_stop_camera_stream(self):
@@ -495,6 +508,7 @@ class DetectionWidget(QtWidgets.QWidget):
             self.change_projection_area_settings_widgets_state(False)
             self.change_detection_settings_widgets_state(False)
             self.projection_area_widget.clear_projection_area()
+            self.projection_area_widget.hide()
 
             # Stop camera stream reading
             self.__camera_service.stop_camera_stream_reading()
@@ -519,11 +533,10 @@ class DetectionWidget(QtWidgets.QWidget):
             helpers.convert_opencv_image_to_pixmap(camera_frame).scaled(self.projection_area_camera_stream_label.size(),
                                                                         QtCore.Qt.KeepAspectRatio))
 
-        # Create projection area widget
-        self.projection_area_widget = ProjectionAreaWidget(self)
+        # Change projection area widget size
         self.projection_area_widget.setFixedSize(self.projection_area_camera_stream_label.pixmap().size())
-        self.projection_area_widget.projection_area_set.connect(self.projection_area_set)
-        self.camera_stream_widgets_layout.addWidget(self.projection_area_widget, 1, 0, alignment=QtCore.Qt.AlignHCenter)
+        self.projection_area_widget.show()
+
         self.camera_frame_resolution = (camera_frame.shape[1], camera_frame.shape[0])  # Save actual camera resolution
 
         self.__camera_service.update_camera_frame_read_slot(self.update_first_frame,
@@ -651,6 +664,9 @@ class DetectionWidget(QtWidgets.QWidget):
             self.selected_projection_area_resolution = self.projection_area_width_spin_box.value(), \
                                                        self.projection_area_height_spin_box.value()
 
+        # Set detections drawing parameters based on camera and projection area resolutions
+        self.set_detections_drawing_parameters()
+
         # Get projection area coordinates
         projection_area_polygon_coordinates = helpers.convert_polygon_points_to_coordinates_list(
             self.projection_area_widget.get_projection_area_polygon())
@@ -680,38 +696,45 @@ class DetectionWidget(QtWidgets.QWidget):
         self.change_camera_and_projection_area_settings_group_boxes_state(False)
         self.location_of_detected_persons_label.show()
 
+    def set_detections_drawing_parameters(self):
+        self.detected_persons_pen.setWidth(self.camera_frame_resolution[0] * 10 / 1920)
+        self.detected_persons_painter_font.setPointSize(self.camera_frame_resolution[0] * 32 / 1920)
+        self.detected_persons_locations_ellipse_size = self.selected_projection_area_resolution[0] * 50 / 1920
+
     @QtCore.pyqtSlot(tuple)
     def camera_frame_processed(self, results):
-        camera_frame_to_process, camera_frame_to_process_warped, fps_number, result_confidences, \
-        result_bounding_boxes, result_persons_locations = results
+        camera_frame, camera_frame_warped, fps_number, confidences, bounding_boxes, persons_locations = results
 
         # Draw detected persons
-        pixmap = helpers.convert_opencv_image_to_pixmap(camera_frame_to_process)
-        painter_1 = QtGui.QPainter()
-        painter_1.begin(pixmap)
-        painter_1.setRenderHint(QtGui.QPainter.Antialiasing)
-        painter_1.setPen(QtGui.QPen(QtGui.QColor(0, 255, 0), 5))
-        for (confidence, box) in zip(result_confidences, result_bounding_boxes):
-            painter_1.drawRect(box[0], box[1], box[2], box[3])
-            painter_1.drawText(box[0], box[1] - 10, "Person: %.2f" % confidence)
-        painter_1.end()
-        painter_1.drawText(0, 15, "FPS: %.2f" % fps_number)
+        camera_frame_pixmap = helpers.convert_opencv_image_to_pixmap(camera_frame)
 
-        self.projection_area_camera_stream_label.setPixmap(pixmap.scaled(
-            self.projection_area_camera_stream_label.size(), QtCore.Qt.KeepAspectRatio))
+        self.detected_persons_painter.begin(camera_frame_pixmap)
+        self.detected_persons_painter.setPen(self.detected_persons_pen)
+        self.detected_persons_painter.setFont(self.detected_persons_painter_font)
+        for (confidence, bounding_box) in zip(confidences, bounding_boxes):
+            self.detected_persons_painter.drawText(bounding_box[0], bounding_box[1] - 10, "Person: %.2f" % confidence)
+            self.detected_persons_painter.drawRect(bounding_box[0], bounding_box[1], bounding_box[2], bounding_box[3])
+        self.detected_persons_painter.end()
+
+        self.projection_area_camera_stream_label.setPixmap(
+            camera_frame_pixmap.scaled(
+                self.projection_area_camera_stream_label.size(), QtCore.Qt.KeepAspectRatio))
 
         # Draw location of detected persons
-        pixmap = helpers.convert_opencv_image_to_pixmap(camera_frame_to_process_warped)
-        painter_2 = QtGui.QPainter()
-        painter_2.begin(pixmap)
-        painter_2.setRenderHint(QtGui.QPainter.Antialiasing)
-        painter_2.setPen(QtGui.QPen(QtGui.QColor(0, 255, 0), 5))
-        for point in result_persons_locations:
-            painter_2.drawEllipse(point[0], point[1], 30, 30)
-        painter_2.end()
+        camera_frame_warped_pixmap = helpers.convert_opencv_image_to_pixmap(camera_frame_warped)
 
-        self.location_of_detected_persons_label.setPixmap(pixmap.scaled(
-            self.location_of_detected_persons_label.size(), QtCore.Qt.KeepAspectRatio))
+        self.detected_persons_locations_painter.begin(camera_frame_warped_pixmap)
+        self.detected_persons_locations_painter.setBrush(self.detected_persons_locations_brush)
+        for person_location in persons_locations:
+            self.detected_persons_locations_painter.drawEllipse(person_location[0],
+                                                                person_location[1],
+                                                                self.detected_persons_locations_ellipse_size,
+                                                                self.detected_persons_locations_ellipse_size)
+        self.detected_persons_locations_painter.end()
+
+        self.location_of_detected_persons_label.setPixmap(
+            camera_frame_warped_pixmap.scaled(
+                self.location_of_detected_persons_label.size(), QtCore.Qt.KeepAspectRatio))
 
     @QtCore.pyqtSlot()
     def stop_detection(self):
