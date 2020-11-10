@@ -153,6 +153,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if exit_question_result == QtWidgets.QMessageBox.Yes:
             if self.__camera_service.is_camera_stream_reading_running():
                 self.__camera_service.stop_camera_stream_reading()
+            if self.__person_location_detection_service.is_person_location_detection_running():
+                self.__person_location_detection_service.stop_person_location_detection()
             event.accept()
         else:
             event.ignore()
@@ -269,11 +271,11 @@ class DetectionWidget(QtWidgets.QWidget):
 
         self.location_of_detected_persons_text_label = QtWidgets.QLabel("Location of detected persons", self)
         self.location_of_detected_persons_widgets_layout.addWidget(self.location_of_detected_persons_text_label,
-                                                                   alignment=QtCore.Qt.AlignHCenter)
+                                                                   alignment=QtCore.Qt.AlignTop | QtCore.Qt.AlignHCenter)
 
-        self.location_of_detected_persons = QtWidgets.QLabel(self)
-        self.location_of_detected_persons.setAlignment(QtCore.Qt.AlignHCenter)
-        self.location_of_detected_persons_widgets_layout.addWidget(self.location_of_detected_persons, stretch=1)
+        self.location_of_detected_persons_label = QtWidgets.QLabel(self)
+        self.location_of_detected_persons_label.setAlignment(QtCore.Qt.AlignHCenter)
+        self.location_of_detected_persons_widgets_layout.addWidget(self.location_of_detected_persons_label, stretch=1)
 
         # Detection settings widgets
         self.settings_layout = QtWidgets.QVBoxLayout(self)
@@ -630,11 +632,14 @@ class DetectionWidget(QtWidgets.QWidget):
     def slider_value_changed(self, value):
         if self.sender() == self.confidence_threshold_slider:
             updated_confidence_threshold = value * 0.01
-            self.__person_location_detection_service.update_confidence_threshold(updated_confidence_threshold)
+            if self.__person_location_detection_service.is_person_location_detection_running():
+                self.__person_location_detection_service.update_detection_model_confidence_threshold(
+                    updated_confidence_threshold)
             self.confidence_threshold_label.setText(str(round(updated_confidence_threshold, 2)))
         else:
             updated_nms_threshold = value * 0.01
-            self.__person_location_detection_service.update_nms_threshold(updated_nms_threshold)
+            if self.__person_location_detection_service.is_person_location_detection_running():
+                self.__person_location_detection_service.update_detection_model_nms_threshold(updated_nms_threshold)
             self.nms_threshold_label.setText(str(round(updated_nms_threshold, 2)))
 
     @QtCore.pyqtSlot()
@@ -654,7 +659,7 @@ class DetectionWidget(QtWidgets.QWidget):
                                                                                    current_resolution,
                                                                                    self.camera_frame_resolution)
 
-        # Disconnect camera_frame_read slot and start person location detection
+        # Start person location detection
         self.__camera_service.disconnect_camera_frame_read_slot(self.camera_frame_read)
         self.__person_location_detection_service.start_person_location_detection(
             self.select_detection_model_weights_file_line_edit.text(),
@@ -665,14 +670,60 @@ class DetectionWidget(QtWidgets.QWidget):
             self.nms_threshold_slider.value() * 0.01,
             projection_area_coordinates,
             self.selected_projection_area_resolution,
-            self.camera_frame_processed,
-            self.__camera_service)
+            self.camera_frame_processed)
+        self.__camera_service.switch_camera_stream_reading_state(
+            True, self.__person_location_detection_service.camera_frames_to_process)
 
         # Update UI
         self.start_detection_push_button.setEnabled(False)
         self.stop_detection_push_button.setEnabled(True)
         self.change_camera_and_projection_area_settings_group_boxes_state(False)
-        self.location_of_detected_persons.show()
+        self.location_of_detected_persons_label.show()
+
+    @QtCore.pyqtSlot(tuple)
+    def camera_frame_processed(self, results):
+        camera_frame_to_process, camera_frame_to_process_warped, fps_number, result_confidences, \
+        result_bounding_boxes, result_persons_locations = results
+
+        # Draw detected persons
+        pixmap = helpers.convert_opencv_image_to_pixmap(camera_frame_to_process)
+        painter_1 = QtGui.QPainter()
+        painter_1.begin(pixmap)
+        painter_1.setRenderHint(QtGui.QPainter.Antialiasing)
+        painter_1.setPen(QtGui.QPen(QtGui.QColor(0, 255, 0), 5))
+        for (confidence, box) in zip(result_confidences, result_bounding_boxes):
+            painter_1.drawRect(box[0], box[1], box[2], box[3])
+            painter_1.drawText(box[0], box[1] - 10, "Person: %.2f" % confidence)
+        painter_1.end()
+        painter_1.drawText(0, 15, "FPS: %.2f" % fps_number)
+
+        self.projection_area_camera_stream_label.setPixmap(pixmap.scaled(
+            self.projection_area_camera_stream_label.size(), QtCore.Qt.KeepAspectRatio))
+
+        # Draw location of detected persons
+        pixmap = helpers.convert_opencv_image_to_pixmap(camera_frame_to_process_warped)
+        painter_2 = QtGui.QPainter()
+        painter_2.begin(pixmap)
+        painter_2.setRenderHint(QtGui.QPainter.Antialiasing)
+        painter_2.setPen(QtGui.QPen(QtGui.QColor(0, 255, 0), 5))
+        for point in result_persons_locations:
+            painter_2.drawEllipse(point[0], point[1], 30, 30)
+        painter_2.end()
+
+        self.location_of_detected_persons_label.setPixmap(pixmap.scaled(
+            self.location_of_detected_persons_label.size(), QtCore.Qt.KeepAspectRatio))
+
+    @QtCore.pyqtSlot()
+    def stop_detection(self):
+        # Stop person location detection
+        self.__camera_service.switch_camera_stream_reading_state(False)
+        self.__person_location_detection_service.stop_person_location_detection()
+        self.__camera_service.connect_camera_frame_read_slot(self.camera_frame_read)
+
+        self.stop_detection_push_button.setEnabled(False)
+        self.start_detection_push_button.setEnabled(True)
+        self.change_camera_and_projection_area_settings_group_boxes_state(True)
+        self.location_of_detected_persons_label.hide()
 
     def change_camera_and_projection_area_settings_group_boxes_state(self, is_enabled):
         self.camera_settings_group_box.setEnabled(is_enabled)
@@ -682,48 +733,6 @@ class DetectionWidget(QtWidgets.QWidget):
         self.select_detection_model_configuration_file_push_button.setEnabled(is_enabled)
         self.select_detection_model_configuration_file_line_edit.setEnabled(is_enabled)
         self.person_class_id_spin_box.setEnabled(is_enabled)
-
-    @QtCore.pyqtSlot(tuple)
-    def camera_frame_processed(self, results):
-        camera_frame, camera_frame_warped, confidences, boxes, bbox_center_points, person_points = results
-
-        # Draw detected persons
-        pixmap = helpers.convert_opencv_image_to_pixmap(camera_frame)
-        painter_1 = QtGui.QPainter()
-        painter_1.begin(pixmap)
-        painter_1.setRenderHint(QtGui.QPainter.Antialiasing)
-        painter_1.setPen(QtGui.QPen(QtGui.QColor(0, 255, 0), 5))
-        for (confidence, box, center_point) in zip(confidences, boxes, bbox_center_points):
-            painter_1.drawRect(box[0], box[1], box[2], box[3])
-            painter_1.drawEllipse(center_point[0], center_point[1], 5, 5)
-            painter_1.drawText(box[0], box[1] - 10, "Person: %.2f" % confidence)
-        painter_1.end()
-
-        # painter.drawText(0, 15, "FPS: %.2f" % (1 / (end_detection_time - start_detection_time)))
-        self.projection_area_camera_stream_label.setPixmap(pixmap.scaled(
-            self.projection_area_camera_stream_label.size(), QtCore.Qt.KeepAspectRatio))
-
-        # Draw location of detected persons
-        pixmap = helpers.convert_opencv_image_to_pixmap(camera_frame_warped)
-        painter_2 = QtGui.QPainter()
-        painter_2.begin(pixmap)
-        painter_2.setRenderHint(QtGui.QPainter.Antialiasing)
-        painter_2.setPen(QtGui.QPen(QtGui.QColor(0, 255, 0), 5))
-        for point in person_points:
-            painter_2.drawEllipse(point[0], point[1], 30, 30)
-        painter_2.end()
-
-        self.location_of_detected_persons.setPixmap(pixmap.scaled(
-            self.location_of_detected_persons.size(), QtCore.Qt.KeepAspectRatio))
-
-    @QtCore.pyqtSlot()
-    def stop_detection(self):
-        self.__camera_service.connect_camera_frame_read_slot(self.camera_frame_read)
-
-        self.stop_detection_push_button.setEnabled(False)
-        self.start_detection_push_button.setEnabled(True)
-        self.change_camera_and_projection_area_settings_group_boxes_state(True)
-        self.location_of_detected_persons.hide()
 
 
 class AboutWidget(QtWidgets.QWidget):
