@@ -1,9 +1,10 @@
-from PyQt5 import QtCore
 import numpy as np
 import cv2 as cv
-import time
-from shapely.geometry import Point, Polygon
 import queue
+import constants
+import time
+from PyQt5 import QtCore
+from shapely.geometry import Point, Polygon
 
 
 class CameraStreamReaderThread(QtCore.QThread):
@@ -16,55 +17,69 @@ class CameraStreamReaderThread(QtCore.QThread):
 
     def __init__(self, camera_index, camera_resolution):
         """
-        Initializes thread: sets camera index, resolution and "active" thread flag.
+        Initializes thread.
 
         :param camera_index: index of the connected camera
         :param camera_resolution: resolution of the connected camera
         """
         super(CameraStreamReaderThread, self).__init__()
 
-        self.__camera_index = camera_index
-        self.__camera_resolution = camera_resolution
-        self.__is_active = True
-        self.__is_detection_active = False
+        self.camera_index = camera_index
+        self.camera_resolution = camera_resolution
+        self.is_running = False
+        self.video_capture = None
+        self.is_person_location_detection_running = False
+        self.camera_frames_to_process = None
 
     def run(self):
         """
-        Runs thread: initializes connected camera, emits initialization status signal, captures camera frames and emits
-        signals with current read frame.
+        Runs thread: initializes connected camera and captures its frames. Thread can switch its state and start putting
+        camera frames into the queue in order for person location detection thread to process them.
         """
-        video_capture = cv.VideoCapture(self.__camera_index)
-        if not video_capture.isOpened():
+        self.is_running = True
+
+        if not self.__initialize_camera():
             self.camera_initialized.emit(False)
-            self.__is_active = False
+            self.is_running = False
+            self.video_capture = None
             return
 
-        video_capture.set(cv.CAP_PROP_FRAME_WIDTH, self.__camera_resolution[0])
-        video_capture.set(cv.CAP_PROP_FRAME_HEIGHT, self.__camera_resolution[1])
         self.camera_initialized.emit(True)
 
-        while self.__is_active:
+        while self.is_running:
+            is_successful_camera_frame_read, camera_frame = self.video_capture.read()
+            if is_successful_camera_frame_read:
+                self.camera_frame_read.emit(camera_frame)
 
-            if self.__is_detection_active:
-                is_success_frame_read, frame = video_capture.read()
-                if is_success_frame_read:
-                    self.tasks.put(frame)
-            else:
-                is_success_frame_read, frame = video_capture.read()
-                if is_success_frame_read:
-                    self.camera_frame_read.emit(frame)
+                if self.is_person_location_detection_running:
+                    self.camera_frames_to_process.put(camera_frame)
+                    self.camera_frames_to_process.join()
 
-        video_capture.release()
+        self.video_capture.release()
+
+    def __initialize_camera(self):
+        """
+        Initializes camera.
+
+        :return: whether camera has been initialized successfully
+        """
+        self.video_capture = cv.VideoCapture(self.camera_index)
+        if not self.video_capture.isOpened():
+            return False
+
+        self.video_capture.set(cv.CAP_PROP_FRAME_WIDTH, self.camera_resolution[0])
+        self.video_capture.set(cv.CAP_PROP_FRAME_HEIGHT, self.camera_resolution[1])
+
+        return True
 
     def stop(self):
         """
-        Stops thread: releases connected camera and waits for thread exit.
+        Stops thread: returns thread to the initial state (before running).
         """
-        self.__is_active = False
+        self.is_running = False
+        self.is_person_location_detection_running = False
         self.wait()
-
-    def detection_state_changed(self, is_detection_active):
-        self.__is_detection_active = is_detection_active
+        self.video_capture = None
 
 
 class CameraService:
@@ -74,21 +89,29 @@ class CameraService:
 
     def __init__(self):
         """
-        Initializes service: sets camera stream reader thread.
+        Initializes service.
         """
         self.__camera_stream_reader_thread = None
+
+    def is_camera_stream_reading_running(self):
+        """
+        Returns whether camera stream reading is running (whether camera stream reader thread has been started).
+
+        :return: whether camera stream reading is running
+        """
+        return self.__camera_stream_reader_thread is not None and self.__camera_stream_reader_thread.is_running
 
     def start_camera_stream_reading(self, camera_index, camera_resolution, camera_initialized_slot,
                                     camera_frame_read_slot):
         """
-        Creates camera stream reader thread, connects slots with signals and starts thread execution.
+        Creates camera stream reader thread, connects signals with slots and starts thread execution.
 
         :param camera_index: index of the connected camera
         :param camera_resolution: resolution of the connected camera
         :param camera_initialized_slot: slot that is called when the camera has been initialized
         :param camera_frame_read_slot: slot that is called when the camera frame has been read
         """
-        if self.is_camera_stream_reading_active():
+        if self.is_camera_stream_reading_running():
             raise Exception("You need to stop camera stream reading first!")
 
         self.__camera_stream_reader_thread = CameraStreamReaderThread(camera_index, camera_resolution)
@@ -96,143 +119,347 @@ class CameraService:
         self.__camera_stream_reader_thread.camera_frame_read.connect(camera_frame_read_slot)
         self.__camera_stream_reader_thread.start()
 
-    def update_camera_frame_read_slot(self, camera_frame_read_slot):
+    def update_camera_frame_read_slot(self, current_camera_frame_read_slot, updated_camera_frame_read_slot):
         """
         Updates "camera frame read" slot.
 
-        :param camera_frame_read_slot: slot that is called when the camera frame has been read
+        :param current_camera_frame_read_slot: current slot that is called when the camera frame has been read
+        :param updated_camera_frame_read_slot: updated slot that is called when the camera frame has been read
         """
-        if not self.is_camera_stream_reading_active():
+        if not self.is_camera_stream_reading_running():
             raise Exception("You need to start camera stream reading first!")
 
-        self.__camera_stream_reader_thread.camera_frame_read.disconnect()
+        self.__camera_stream_reader_thread.camera_frame_read.disconnect(current_camera_frame_read_slot)
+        self.__camera_stream_reader_thread.camera_frame_read.connect(updated_camera_frame_read_slot)
+
+    def disconnect_camera_frame_read_slot(self, camera_frame_read_slot):
+        """
+        Disconnects "camera frame read" slot.
+
+        :param camera_frame_read_slot: slot that is called when the camera frame has been read
+        """
+        if not self.is_camera_stream_reading_running():
+            raise Exception("You need to start camera stream reading first!")
+
+        self.__camera_stream_reader_thread.camera_frame_read.disconnect(camera_frame_read_slot)
+
+    def connect_camera_frame_read_slot(self, camera_frame_read_slot):
+        """
+        Connects "camera frame read" slot.
+
+        :param camera_frame_read_slot: slot that is called when the camera frame has been read
+        """
+        if not self.is_camera_stream_reading_running():
+            raise Exception("You need to start camera stream reading first!")
+
         self.__camera_stream_reader_thread.camera_frame_read.connect(camera_frame_read_slot)
+
+    def clean_camera_stream_reading_resources(self):
+        """
+        Cleans camera stream reader thread resources.
+        """
+        if self.__camera_stream_reader_thread is None:
+            raise Exception("You need to start camera stream reading first!")
+
+        self.__camera_stream_reader_thread = None
 
     def stop_camera_stream_reading(self):
         """
-        Stops camera stream reader thread execution.
+        Stops camera stream reader thread execution and cleans its resources.
         """
-        if not self.is_camera_stream_reading_active():
+        if not self.is_camera_stream_reading_running():
             raise Exception("You need to start camera stream reading first!")
 
         self.__camera_stream_reader_thread.stop()
-        self.__camera_stream_reader_thread = None
+        self.clean_camera_stream_reading_resources()
 
-    def is_camera_stream_reading_active(self):
+    def switch_camera_stream_reading_state(self, is_person_location_detection, camera_frames_to_process=None):
         """
-        Returns whether camera stream reading is active (whether camera stream reader thread has been started).
+        Switches camera stream reading state from plain reading to reading camera frames and putting them into the
+        queue in order for person location detection thread to process them and vice versa.
 
-        :return: whether camera stream reading is active
+        :param is_person_location_detection: whether person location detection is running
+        :param camera_frames_to_process: camera frames to process queue
         """
-        return self.__camera_stream_reader_thread is not None
+        if not self.is_camera_stream_reading_running():
+            raise Exception("You need to start camera stream reading first!")
 
-    def detection_started(self, tasks):
-        self.__camera_stream_reader_thread.tasks = tasks
-        self.__camera_stream_reader_thread.detection_state_changed(True)
+        if is_person_location_detection:
+            if camera_frames_to_process is None:
+                raise Exception("Camera frames to process queue should be initialized!")
+
+            self.__camera_stream_reader_thread.camera_frames_to_process = camera_frames_to_process
+            self.__camera_stream_reader_thread.is_person_location_detection_running = True
+        else:
+            self.__camera_stream_reader_thread.is_person_location_detection_running = False
 
 
 class PersonLocationDetectionThread(QtCore.QThread):
+    """
+    Thread that detects locations of persons within the projection area.
+    """
+
     camera_frame_processed = QtCore.pyqtSignal(tuple)
 
     def __init__(self, detection_model_weights_file_path, detection_model_configuration_file_path,
-                 detection_model_scale, detection_model_size, person_class_id, confidence_threshold, nms_threshold,
-                 projection_area_coordinates, projection_area_resolution):
+                 detection_model_input_scale, detection_model_input_size, detection_model_person_class_id,
+                 detection_model_confidence_threshold, detection_model_nms_threshold, projection_area_coordinates,
+                 projection_area_resolution):
+        """
+        Initializes thread.
+
+        :param detection_model_weights_file_path: detection model weights file path
+        :param detection_model_configuration_file_path: detection model configuration file path
+        :param detection_model_input_scale: detection model scale factor for input frames
+        :param detection_model_input_size: detection model input size
+        :param detection_model_person_class_id: detection model person class ID
+        :param detection_model_confidence_threshold: detection model confidence threshold
+        :param detection_model_nms_threshold: detection model non-maximum suppression threshold
+        :param projection_area_coordinates: projection area coordinates
+        :param projection_area_resolution: projection area resolution
+        """
         super(PersonLocationDetectionThread, self).__init__()
 
-        self.__detection_model_weights_file_path = detection_model_weights_file_path
-        self.__detection_model_configuration_file_path = detection_model_configuration_file_path
-        self.__detection_model_scale = detection_model_scale
-        self.__detection_model_size = detection_model_size
-        self.__person_class_id = person_class_id
-        self.confidence_threshold = confidence_threshold
-        self.nms_threshold = nms_threshold
-        self.__projection_area_coordinates = projection_area_coordinates
-        self.__projection_area_resolution = projection_area_resolution
-
-        self.location_detection_tasks = queue.Queue(maxsize=1)
+        self.detection_model_weights_file_path = detection_model_weights_file_path
+        self.detection_model_configuration_file_path = detection_model_configuration_file_path
+        self.detection_model_input_scale = detection_model_input_scale
+        self.detection_model_input_size = detection_model_input_size
+        self.detection_model_person_class_id = detection_model_person_class_id
+        self.detection_model_confidence_threshold = detection_model_confidence_threshold
+        self.detection_model_nms_threshold = detection_model_nms_threshold
+        self.projection_area_coordinates = projection_area_coordinates
+        self.projection_area_resolution = projection_area_resolution
+        self.is_running = False
+        self.camera_frames_to_process = queue.Queue(constants.CAMERA_FRAMES_TO_PROCESS_MAX_NUMBER)
+        self.detection_model = None
+        self.perspective_transformation_matrix = None
+        self.projection_area_polygon = None
 
     def run(self):
-        detection_model = cv.dnn_DetectionModel(self.__detection_model_weights_file_path,
-                                                self.__detection_model_configuration_file_path)
-        detection_model.setPreferableBackend(cv.dnn.DNN_BACKEND_CUDA)
-        detection_model.setPreferableTarget(cv.dnn.DNN_TARGET_CUDA)
-        detection_model.setInputParams(self.__detection_model_scale, self.__detection_model_size)
+        """
+        Runs thread: initializes detection model, perspective transformation matrix, projection area polygon and
+        processes camera frames.
+        """
+        self.is_running = True
 
-        while True:
-            camera_frame = self.location_detection_tasks.get()
+        self.__initialize_detection_model()
+        self.__initialize_perspective_transformation_matrix()
+        self.projection_area_polygon = Polygon(self.projection_area_coordinates)
 
-            start_detection_time = time.time()
-            class_ids, confidences, boxes = detection_model.detect(camera_frame, self.confidence_threshold,
-                                                                   self.nms_threshold)
-            end_detection_time = time.time()
+        while self.is_running:
+            try:
+                camera_frame_to_process = self.camera_frames_to_process.get_nowait()
+            except queue.Empty:
+                continue
 
-            result_class_ids = []
+            class_ids, confidences, bounding_boxes, fps_number = self.__detect_camera_frame_objects_and_measure_fps(
+                camera_frame_to_process)
+
             result_confidences = []
-            result_boxes = []
-            result_center_points = []
-            result_points_ext = []
-
-            # Get warp matrix
-            pts1 = np.float32(self.__projection_area_coordinates)
-            pts2 = np.float32([[self.__projection_area_resolution[0], 0], self.__projection_area_resolution,
-                               [0, self.__projection_area_resolution[1]], [0, 0]])
-            matrix = cv.getPerspectiveTransform(pts1, pts2)
-
-            poly = Polygon(self.__projection_area_coordinates)
-            for (class_id, confidence, box) in zip(class_ids, confidences, boxes):
-                if class_id[0] != self.__person_class_id:
+            result_bounding_boxes = []
+            result_persons_locations = []
+            for (class_id, confidence, bounding_box) in zip(class_ids, confidences, bounding_boxes):
+                if class_id[0] != self.detection_model_person_class_id:
                     continue
 
-                box_bottom_edge_center = (box[0] + box[2] / 2, box[1] + box[3])
-                point = Point(box_bottom_edge_center)
-                if point.within(poly):
-                    result_class_ids.append(class_id)
-                    result_confidences.append(confidence)
-                    result_boxes.append(box)
-                    result_center_points.append(box_bottom_edge_center)
-                    px = (matrix[0][0] * box_bottom_edge_center[0] + matrix[0][1] * box_bottom_edge_center[1] +
-                          matrix[0][2]) / (
-                             (matrix[2][0] * box_bottom_edge_center[0] + matrix[2][1] * box_bottom_edge_center[1] +
-                              matrix[2][2]))
-                    py = (matrix[1][0] * box_bottom_edge_center[0] + matrix[1][1] * box_bottom_edge_center[1] +
-                          matrix[1][2]) / (
-                             (matrix[2][0] * box_bottom_edge_center[0] + matrix[2][1] * box_bottom_edge_center[1] +
-                              matrix[2][2]))
-                    result_points_ext.append((px, py))
+                bounding_box_bottom_edge_center_point, is_within_projection_area = \
+                    self.__is_bounding_box_bottom_edge_center_point_within_projection_area(bounding_box)
+                if not is_within_projection_area:
+                    continue
 
-            camera_frame_warped = cv.warpPerspective(camera_frame, matrix, self.__projection_area_resolution)
-            self.camera_frame_processed.emit(
-                (camera_frame, camera_frame_warped, result_confidences, result_boxes, matrix, result_center_points,
-                 result_points_ext))
+                result_confidences.append(confidence[0])
+                result_bounding_boxes.append(bounding_box)
+                result_persons_locations.append(self.__calculate_person_location(bounding_box_bottom_edge_center_point))
 
-            self.location_detection_tasks.task_done()
+            camera_frame_to_process_warped = self.__warp_camera_frame_to_process(camera_frame_to_process)
+            self.camera_frame_processed.emit((camera_frame_to_process, camera_frame_to_process_warped, fps_number,
+                                              result_confidences, result_bounding_boxes, result_persons_locations))
+
+            self.camera_frames_to_process.task_done()
+
+    def __initialize_detection_model(self):
+        """
+        Initializes detection model.
+        """
+        self.detection_model = cv.dnn_DetectionModel(self.detection_model_weights_file_path,
+                                                     self.detection_model_configuration_file_path)
+        self.detection_model.setPreferableBackend(cv.dnn.DNN_BACKEND_CUDA)
+        self.detection_model.setPreferableTarget(cv.dnn.DNN_TARGET_CUDA)
+        self.detection_model.setInputParams(self.detection_model_input_scale, self.detection_model_input_size)
+
+    def __initialize_perspective_transformation_matrix(self):
+        """
+        Initializes perspective transformation matrix.
+        """
+        source_points = np.float32(self.projection_area_coordinates)
+        destination_points = np.float32([[self.projection_area_resolution[0], 0], self.projection_area_resolution,
+                                         [0, self.projection_area_resolution[1]], [0, 0]])
+        self.perspective_transformation_matrix = cv.getPerspectiveTransform(source_points, destination_points)
+
+    def __detect_camera_frame_objects_and_measure_fps(self, camera_frame_to_process):
+        """
+        Detects objects on the camera frame and measures FPS.
+
+        :param camera_frame_to_process: camera frame to process
+        :return: tuple with class id's, confidences, bounding boxes and FPS number
+        """
+        start_detection_time = time.time()
+        class_ids, confidences, bounding_boxes = self.detection_model.detect(
+            camera_frame_to_process, self.detection_model_confidence_threshold, self.detection_model_nms_threshold)
+        end_detection_time = time.time()
+        fps_number = 1 / (end_detection_time - start_detection_time)
+
+        return class_ids, confidences, bounding_boxes, fps_number
+
+    def __is_bounding_box_bottom_edge_center_point_within_projection_area(self, bounding_box):
+        """
+        Calculates bounding box bottom edge center point and checks whether it is within the projection area.
+
+        :param bounding_box: bounding box
+        :return: calculated bounding box bottom edge center point and indication whether it is within the projection
+        area
+        """
+        bounding_box_bottom_edge_center_point = Point((bounding_box[0] + bounding_box[2] / 2,
+                                                       bounding_box[1] + bounding_box[3]))
+
+        return (bounding_box_bottom_edge_center_point,
+                bounding_box_bottom_edge_center_point.within(self.projection_area_polygon))
+
+    def __calculate_person_location(self, bounding_box_bottom_edge_center_point):
+        """
+        Calculates person location by transforming it in perspective.
+
+        :param bounding_box_bottom_edge_center_point: bounding box bottom edge center point
+        :return: transformed bounding box bottom edge center point
+        """
+        return ((self.perspective_transformation_matrix[0][0] * bounding_box_bottom_edge_center_point.x +
+                 self.perspective_transformation_matrix[0][1] * bounding_box_bottom_edge_center_point.y +
+                 self.perspective_transformation_matrix[0][2]) /
+                (self.perspective_transformation_matrix[2][0] * bounding_box_bottom_edge_center_point.x +
+                 self.perspective_transformation_matrix[2][1] * bounding_box_bottom_edge_center_point.y +
+                 self.perspective_transformation_matrix[2][2]),
+                (self.perspective_transformation_matrix[1][0] * bounding_box_bottom_edge_center_point.x +
+                 self.perspective_transformation_matrix[1][1] * bounding_box_bottom_edge_center_point.y +
+                 self.perspective_transformation_matrix[1][2]) /
+                (self.perspective_transformation_matrix[2][0] * bounding_box_bottom_edge_center_point.x +
+                 self.perspective_transformation_matrix[2][1] * bounding_box_bottom_edge_center_point.y +
+                 self.perspective_transformation_matrix[2][2]))
+
+    def __warp_camera_frame_to_process(self, camera_frame_to_process):
+        """
+        Warps camera frame to process.
+
+        :param camera_frame_to_process: camera frame to process
+        :return: warped camera frame to process
+        """
+        return cv.warpPerspective(camera_frame_to_process, self.perspective_transformation_matrix,
+                                  self.projection_area_resolution)
+
+    def stop(self):
+        """
+        Stops thread: returns thread to the initial state (before running).
+        """
+        self.is_running = False
+        self.wait()
+        self.camera_frames_to_process.queue.clear()
+        self.detection_model = None
+        self.perspective_transformation_matrix = None
+        self.projection_area_polygon = None
 
 
 class PersonLocationDetectionService:
+    """
+    Service that detects locations of persons within the projection area.
+    """
 
     def __init__(self):
-        self.location_detection_thread = None
+        """
+        Initializes service.
+        """
+        self.person_location_detection_thread = None
 
-    def start_person_location_detection(self, weights_file_path, configuration_file_path, scale, size, person_class_id,
-                                        confidence_threshold,
-                                        nms_threshold, projection_area_coordinates, projection_area_resolution,
-                                        camera_frame_processed_slot,
-                                        camera_service):
-        self.location_detection_thread = PersonLocationDetectionThread(weights_file_path, configuration_file_path,
-                                                                       scale,
-                                                                       size, person_class_id, confidence_threshold,
-                                                                       nms_threshold,
-                                                                       projection_area_coordinates,
-                                                                       projection_area_resolution)
-        camera_service.detection_started(self.location_detection_thread.location_detection_tasks)
-        self.location_detection_thread.camera_frame_processed.connect(camera_frame_processed_slot)
+    def is_person_location_detection_running(self):
+        """
+        Returns whether person location detection is running (whether person location detection thread has been
+        started).
 
-        self.location_detection_thread.start()
+        :return: whether person location detection is running
+        """
+        return self.person_location_detection_thread is not None and self.person_location_detection_thread.is_running
 
-    def update_confidence_threshold(self, updated_confidence_threshold):
-        if self.location_detection_thread is not None:
-            self.location_detection_thread.confidence_threshold = updated_confidence_threshold
+    def start_person_location_detection(self, detection_model_weights_file_path,
+                                        detection_model_configuration_file_path, detection_model_input_scale,
+                                        detection_model_input_size, detection_model_person_class_id,
+                                        detection_model_confidence_threshold, detection_model_nms_threshold,
+                                        projection_area_coordinates, projection_area_resolution,
+                                        camera_frame_processed_slot):
+        """
+        Creates person location detection thread, connects signal with slot and starts thread execution.
 
-    def update_nms_threshold(self, updated_nms_threshold):
-        if self.location_detection_thread is not None:
-            self.location_detection_thread.nms_threshold = updated_nms_threshold
+        :param detection_model_weights_file_path: detection model weights file path
+        :param detection_model_configuration_file_path: detection model configuration file path
+        :param detection_model_input_scale: detection model scale factor for input frames
+        :param detection_model_input_size: detection model input size
+        :param detection_model_person_class_id: detection model person class ID
+        :param detection_model_confidence_threshold: detection model confidence threshold
+        :param detection_model_nms_threshold: detection model non-maximum suppression threshold
+        :param projection_area_coordinates: projection area coordinates
+        :param projection_area_resolution: projection area resolution
+        :param camera_frame_processed_slot: slot that is called when the camera frame has been processed
+        """
+        if self.is_person_location_detection_running():
+            raise Exception("You need to stop person location detection first!")
+
+        self.person_location_detection_thread = PersonLocationDetectionThread(detection_model_weights_file_path,
+                                                                              detection_model_configuration_file_path,
+                                                                              detection_model_input_scale,
+                                                                              detection_model_input_size,
+                                                                              detection_model_person_class_id,
+                                                                              detection_model_confidence_threshold,
+                                                                              detection_model_nms_threshold,
+                                                                              projection_area_coordinates,
+                                                                              projection_area_resolution)
+        self.person_location_detection_thread.camera_frame_processed.connect(camera_frame_processed_slot)
+        self.person_location_detection_thread.start()
+
+    @property
+    def camera_frames_to_process(self):
+        """
+        Gets camera frames to process queue.
+
+        :return: camera frames to process queue
+        """
+        return self.person_location_detection_thread.camera_frames_to_process
+
+    def update_detection_model_confidence_threshold(self, updated_detection_model_confidence_threshold):
+        """
+        Updates detection model confidence threshold.
+
+        :param updated_detection_model_confidence_threshold: updated detection model confidence threshold
+        """
+        if not self.is_person_location_detection_running():
+            raise Exception("You need to start person location detection first!")
+
+        self.person_location_detection_thread.detection_model_confidence_threshold = \
+            updated_detection_model_confidence_threshold
+
+    def update_detection_model_nms_threshold(self, updated_detection_model_nms_threshold):
+        """
+        Updates detection model non-maximum suppression threshold.
+
+        :param updated_detection_model_nms_threshold: updated detection model non-maximum suppression threshold
+        """
+        if not self.is_person_location_detection_running():
+            raise Exception("You need to start person location detection first!")
+
+        self.person_location_detection_thread.detection_model_nms_threshold = updated_detection_model_nms_threshold
+
+    def stop_person_location_detection(self):
+        """
+        Stops person location detection thread execution and cleans its resources.
+        """
+        if not self.is_person_location_detection_running():
+            raise Exception("You need to start person location detection first!")
+
+        self.person_location_detection_thread.stop()
+        self.person_location_detection_thread = None
