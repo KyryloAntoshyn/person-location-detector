@@ -487,6 +487,7 @@ class DetectionWidget(QtWidgets.QWidget):
         # Detected persons painter
         self.detected_persons_painter = QtGui.QPainter()
         self.detected_persons_pen = QtGui.QPen(QtGui.QColor(118, 255, 3), 10)
+        self.detected_persons_painter_fps_font = QtGui.QFont("Roboto", 54)
         self.detected_persons_painter_font = QtGui.QFont("Roboto", 32)
 
         # Detected persons locations
@@ -707,6 +708,7 @@ class DetectionWidget(QtWidgets.QWidget):
 
     def set_detections_drawing_parameters(self):
         self.detected_persons_pen.setWidth(self.camera_frame_resolution[0] * 10 / 1920)
+        self.detected_persons_painter_fps_font.setPointSize(self.camera_frame_resolution[0] * 54 / 1920)
         self.detected_persons_painter_font.setPointSize(self.camera_frame_resolution[0] * 32 / 1920)
         self.detected_persons_locations_ellipse_size = self.selected_projection_area_resolution[0] * 50 / 1920
 
@@ -719,9 +721,14 @@ class DetectionWidget(QtWidgets.QWidget):
 
         self.detected_persons_painter.begin(camera_frame_pixmap)
         self.detected_persons_painter.setPen(self.detected_persons_pen)
+        self.detected_persons_painter.setFont(self.detected_persons_painter_fps_font)
+        self.detected_persons_painter.drawText(0, self.detected_persons_painter_fps_font.pointSize(),
+                                               "FPS: %d" % fps_number)
         self.detected_persons_painter.setFont(self.detected_persons_painter_font)
         for (confidence, bounding_box) in zip(confidences, bounding_boxes):
-            self.detected_persons_painter.drawText(bounding_box[0], bounding_box[1] - 10, "Person: %.2f" % confidence)
+            self.detected_persons_painter.drawText(bounding_box[0],
+                                                   bounding_box[1] - self.detected_persons_painter_font.pointSize(),
+                                                   "Person: %.2f" % confidence)
             self.detected_persons_painter.drawRect(bounding_box[0], bounding_box[1], bounding_box[2], bounding_box[3])
         self.detected_persons_painter.end()
 
