@@ -46,6 +46,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setWindowIcon(QtGui.QIcon(":/icons/application_logo"))
         self.setWindowTitle(constants.APPLICATION_NAME)
 
+        self.setStyleSheet("QMainWindow { background-color: #EEEEEE; }")
+
         frame_geometry = self.frameGeometry()
         frame_geometry.moveCenter(QtWidgets.QDesktopWidget().availableGeometry().center())
         self.move(frame_geometry.topLeft())
@@ -128,6 +130,7 @@ class MainWindow(QtWidgets.QMainWindow):
         animation_start_value, animation_end_value = self.MENU_WIDGET_MIN_AND_MAX_WIDTHS if is_checked else reversed(
             self.MENU_WIDGET_MIN_AND_MAX_WIDTHS)
 
+        self.menu_property_animation.stop()
         self.menu_property_animation.setDuration(300)
         self.menu_property_animation.setStartValue(animation_start_value)
         self.menu_property_animation.setEndValue(animation_end_value)
@@ -249,6 +252,7 @@ class DetectionWidget(QtWidgets.QWidget):
 
         # Camera stream widgets
         self.camera_stream_widgets_layout = QtWidgets.QGridLayout(self)
+        self.camera_stream_widgets_layout.setSpacing(0)
         self.camera_stream_widgets_layout.setRowStretch(0, 0)
         self.camera_stream_widgets_layout.setRowStretch(1, 1)
 
@@ -270,6 +274,7 @@ class DetectionWidget(QtWidgets.QWidget):
 
         # Location of detected persons widgets
         self.location_of_detected_persons_widgets_layout = QtWidgets.QVBoxLayout(self)
+        self.location_of_detected_persons_widgets_layout.setSpacing(0)
         self.detection_widget_layout.addLayout(self.location_of_detected_persons_widgets_layout, 1, 0, 1, 1)
 
         self.location_of_detected_persons_text_label = QtWidgets.QLabel("Location of detected persons", self)
@@ -391,19 +396,27 @@ class DetectionWidget(QtWidgets.QWidget):
         self.detection_settings_group_box_layout.setSpacing(15)
 
         self.detection_model_weights_widgets_layout = QtWidgets.QHBoxLayout(self.detection_settings_group_box)
+        self.select_detection_model_weights_file_line_edit = QtWidgets.QLineEdit(self.detection_settings_group_box)
+        self.select_detection_model_weights_file_line_edit.setReadOnly(True)
+        self.detection_model_weights_widgets_layout.addWidget(self.select_detection_model_weights_file_line_edit)
+
         self.select_detection_model_weights_file_push_button = QtWidgets.QPushButton("Select",
                                                                                      self.detection_settings_group_box)
         self.select_detection_model_weights_file_push_button.setFixedWidth(100)
         self.select_detection_model_weights_file_push_button.clicked.connect(
             self.select_detection_model_weights_or_configuration)
         self.detection_model_weights_widgets_layout.addWidget(self.select_detection_model_weights_file_push_button)
-        self.select_detection_model_weights_file_line_edit = QtWidgets.QLineEdit(self.detection_settings_group_box)
-        self.select_detection_model_weights_file_line_edit.setReadOnly(True)
-        self.detection_model_weights_widgets_layout.addWidget(self.select_detection_model_weights_file_line_edit)
+
         self.detection_settings_group_box_layout.addRow("Detection model weights",
                                                         self.detection_model_weights_widgets_layout)
 
         self.detection_model_configuration_widgets_layout = QtWidgets.QHBoxLayout(self.detection_settings_group_box)
+        self.select_detection_model_configuration_file_line_edit = QtWidgets.QLineEdit(
+            self.detection_settings_group_box)
+        self.select_detection_model_configuration_file_line_edit.setReadOnly(True)
+        self.detection_model_configuration_widgets_layout.addWidget(
+            self.select_detection_model_configuration_file_line_edit)
+
         self.select_detection_model_configuration_file_push_button = QtWidgets.QPushButton("Select",
                                                                                            self.detection_settings_group_box)
         self.select_detection_model_configuration_file_push_button.setFixedWidth(100)
@@ -411,11 +424,7 @@ class DetectionWidget(QtWidgets.QWidget):
             self.select_detection_model_weights_or_configuration)
         self.detection_model_configuration_widgets_layout.addWidget(
             self.select_detection_model_configuration_file_push_button)
-        self.select_detection_model_configuration_file_line_edit = QtWidgets.QLineEdit(
-            self.detection_settings_group_box)
-        self.select_detection_model_configuration_file_line_edit.setReadOnly(True)
-        self.detection_model_configuration_widgets_layout.addWidget(
-            self.select_detection_model_configuration_file_line_edit)
+
         self.detection_settings_group_box_layout.addRow("Detection model configuration",
                                                         self.detection_model_configuration_widgets_layout)
 
@@ -427,31 +436,31 @@ class DetectionWidget(QtWidgets.QWidget):
 
         self.confidence_threshold_slider_layout = QtWidgets.QHBoxLayout(self.detection_settings_group_box)
 
-        self.confidence_threshold_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal, self.detection_settings_group_box)
-        self.confidence_threshold_slider.setMinimum(10)
-        self.confidence_threshold_slider.setMaximum(100)
-        self.confidence_threshold_slider.setValue(50)
-        self.confidence_threshold_slider.valueChanged.connect(self.slider_value_changed)
-        self.confidence_threshold_slider_layout.addWidget(self.confidence_threshold_slider)
-
         self.confidence_threshold_label = QtWidgets.QLabel("0.5", self.detection_settings_group_box)
         self.confidence_threshold_label.setFixedWidth(40)
         self.confidence_threshold_slider_layout.addWidget(self.confidence_threshold_label)
+
+        self.confidence_threshold_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal, self.detection_settings_group_box)
+        self.confidence_threshold_slider.setMinimum(10)
+        self.confidence_threshold_slider.setMaximum(90)
+        self.confidence_threshold_slider.setValue(50)
+        self.confidence_threshold_slider.valueChanged.connect(self.slider_value_changed)
+        self.confidence_threshold_slider_layout.addWidget(self.confidence_threshold_slider)
 
         self.detection_settings_group_box_layout.addRow("Confidence threshold", self.confidence_threshold_slider_layout)
 
         self.nms_threshold_slider_layout = QtWidgets.QHBoxLayout(self.detection_settings_group_box)
 
-        self.nms_threshold_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal, self.detection_settings_group_box)
-        self.nms_threshold_slider.setMinimum(0)
-        self.nms_threshold_slider.setMaximum(100)
-        self.nms_threshold_slider.setValue(40)
-        self.nms_threshold_slider.valueChanged.connect(self.slider_value_changed)
-        self.nms_threshold_slider_layout.addWidget(self.nms_threshold_slider)
-
         self.nms_threshold_label = QtWidgets.QLabel("0.4", self.detection_settings_group_box)
         self.nms_threshold_label.setFixedWidth(40)
         self.nms_threshold_slider_layout.addWidget(self.nms_threshold_label)
+
+        self.nms_threshold_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal, self.detection_settings_group_box)
+        self.nms_threshold_slider.setMinimum(10)
+        self.nms_threshold_slider.setMaximum(90)
+        self.nms_threshold_slider.setValue(40)
+        self.nms_threshold_slider.valueChanged.connect(self.slider_value_changed)
+        self.nms_threshold_slider_layout.addWidget(self.nms_threshold_slider)
 
         self.detection_settings_group_box_layout.addRow("NMS threshold", self.nms_threshold_slider_layout)
 
@@ -761,7 +770,25 @@ class DetectionWidget(QtWidgets.QWidget):
 class AboutWidget(QtWidgets.QWidget):
     def __init__(self):
         super(AboutWidget, self).__init__()
-        self.init_ui()
 
-    def init_ui(self):
-        lbl = QtWidgets.QLabel("About widget", self)
+        self.about_widget_layout = QtWidgets.QVBoxLayout(self)
+        self.about_widget_layout.setAlignment(QtCore.Qt.AlignCenter)
+        self.about_widget_layout.setSpacing(0)
+
+        self.application_logo_label = QtWidgets.QLabel(self)
+        self.application_logo_label.setPixmap(QtGui.QPixmap(":/icons/application_logo"))
+        self.about_widget_layout.addWidget(self.application_logo_label, alignment=QtCore.Qt.AlignHCenter)
+
+        self.person_location_detector_label = QtWidgets.QLabel("<strong>Person Location Detector</strong>", self)
+        self.person_location_detector_label.setFont(QtGui.QFont("Roboto", 24))
+        self.about_widget_layout.addWidget(self.person_location_detector_label, alignment=QtCore.Qt.AlignHCenter)
+
+        self.developed_by_label = QtWidgets.QLabel("Developed by", self)
+        self.developed_by_label.setFont(QtGui.QFont("Roboto", 18))
+        self.developed_by_label.setStyleSheet("margin-top: 30px;")
+        self.about_widget_layout.addWidget(self.developed_by_label, alignment=QtCore.Qt.AlignHCenter)
+
+        self.kyrylo_antoshyn_label = QtWidgets.QLabel("<strong>Kyrylo Antoshyn</strong>", self)
+        self.kyrylo_antoshyn_label.setFont(QtGui.QFont("Roboto", 18))
+
+        self.about_widget_layout.addWidget(self.kyrylo_antoshyn_label, alignment=QtCore.Qt.AlignHCenter)
