@@ -10,3 +10,8 @@ You need to perform following steps in order to run the application on NVIDIA Je
 5. Make this script executable and run it in order to build and install OpenCV: `chmod +x installation/build_and_install_opencv.sh && installation/build_and_install_opencv.sh`
 6. Install application dependencies: `sudo apt-get update && sudo apt-get install python3-pyqt5 python3-shapely`
 7. Run the application: `python3 person_location_detector/person_location_detector.py`
+
+# Neural network training scripts
+This repository contains following neural network training scripts inside the *training* directory:
+1. `download_coco_single_class_images.py` — can be used to download COCO dataset images for 1 class (before running you need to install *pycocotools*)
+2. `generate_dataset_images_relative_paths.py` — can be used to generate dataset images relative paths (place it into the *scripts* directory inside the *darknet*)
