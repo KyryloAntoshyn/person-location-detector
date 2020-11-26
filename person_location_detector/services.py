@@ -375,7 +375,7 @@ class PersonLocationDetectionService:
         """
         Initializes service.
         """
-        self.person_location_detection_thread = None
+        self.__person_location_detection_thread = None
 
     def is_person_location_detection_running(self):
         """
@@ -384,7 +384,7 @@ class PersonLocationDetectionService:
 
         :return: whether person location detection is running
         """
-        return self.person_location_detection_thread is not None and self.person_location_detection_thread.is_running
+        return self.__person_location_detection_thread is not None and self.__person_location_detection_thread.is_running
 
     def start_person_location_detection(self, detection_model_weights_file_path,
                                         detection_model_configuration_file_path, detection_model_input_scale,
@@ -409,17 +409,17 @@ class PersonLocationDetectionService:
         if self.is_person_location_detection_running():
             raise Exception("You need to stop person location detection first!")
 
-        self.person_location_detection_thread = PersonLocationDetectionThread(detection_model_weights_file_path,
-                                                                              detection_model_configuration_file_path,
-                                                                              detection_model_input_scale,
-                                                                              detection_model_input_size,
-                                                                              detection_model_person_class_id,
-                                                                              detection_model_confidence_threshold,
-                                                                              detection_model_nms_threshold,
-                                                                              projection_area_coordinates,
-                                                                              projection_area_resolution)
-        self.person_location_detection_thread.camera_frame_processed.connect(camera_frame_processed_slot)
-        self.person_location_detection_thread.start()
+        self.__person_location_detection_thread = PersonLocationDetectionThread(detection_model_weights_file_path,
+                                                                                detection_model_configuration_file_path,
+                                                                                detection_model_input_scale,
+                                                                                detection_model_input_size,
+                                                                                detection_model_person_class_id,
+                                                                                detection_model_confidence_threshold,
+                                                                                detection_model_nms_threshold,
+                                                                                projection_area_coordinates,
+                                                                                projection_area_resolution)
+        self.__person_location_detection_thread.camera_frame_processed.connect(camera_frame_processed_slot)
+        self.__person_location_detection_thread.start()
 
     @property
     def camera_frames_to_process(self):
@@ -428,7 +428,7 @@ class PersonLocationDetectionService:
 
         :return: camera frames to process queue
         """
-        return self.person_location_detection_thread.camera_frames_to_process
+        return self.__person_location_detection_thread.camera_frames_to_process
 
     def update_detection_model_confidence_threshold(self, updated_detection_model_confidence_threshold):
         """
@@ -439,7 +439,7 @@ class PersonLocationDetectionService:
         if not self.is_person_location_detection_running():
             raise Exception("You need to start person location detection first!")
 
-        self.person_location_detection_thread.detection_model_confidence_threshold = \
+        self.__person_location_detection_thread.detection_model_confidence_threshold = \
             updated_detection_model_confidence_threshold
 
     def update_detection_model_nms_threshold(self, updated_detection_model_nms_threshold):
@@ -451,7 +451,7 @@ class PersonLocationDetectionService:
         if not self.is_person_location_detection_running():
             raise Exception("You need to start person location detection first!")
 
-        self.person_location_detection_thread.detection_model_nms_threshold = updated_detection_model_nms_threshold
+        self.__person_location_detection_thread.detection_model_nms_threshold = updated_detection_model_nms_threshold
 
     def stop_person_location_detection(self):
         """
@@ -460,5 +460,5 @@ class PersonLocationDetectionService:
         if not self.is_person_location_detection_running():
             raise Exception("You need to start person location detection first!")
 
-        self.person_location_detection_thread.stop()
-        self.person_location_detection_thread = None
+        self.__person_location_detection_thread.stop()
+        self.__person_location_detection_thread = None
