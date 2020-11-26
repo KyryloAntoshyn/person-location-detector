@@ -3,7 +3,6 @@ from PyQt5 import QtWidgets, QtCore, QtGui
 import numpy as np
 import os
 import helpers
-import constants
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -44,7 +43,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setFixedSize(QtWidgets.QApplication.primaryScreen().availableGeometry().size())
 
         self.setWindowIcon(QtGui.QIcon(":/icons/application_logo"))
-        self.setWindowTitle(constants.APPLICATION_NAME)
+        self.setWindowTitle("Person Location Detector")
 
         self.setStyleSheet("QMainWindow { background-color: #EEEEEE; }")
 
@@ -149,7 +148,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         :param event: close event
         """
-        exit_question_result = QtWidgets.QMessageBox.question(self, constants.APPLICATION_NAME,
+        exit_question_result = QtWidgets.QMessageBox.question(self, "Person Location Detector",
                                                               "Are you sure you want to exit?",
                                                               QtWidgets.QMessageBox.No | QtWidgets.QMessageBox.Yes,
                                                               QtWidgets.QMessageBox.No)

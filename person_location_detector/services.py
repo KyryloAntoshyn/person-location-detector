@@ -1,7 +1,6 @@
 import numpy as np
 import cv2 as cv
 import queue
-import constants
 import time
 from PyQt5 import QtCore
 from shapely.geometry import Point, Polygon
@@ -230,7 +229,7 @@ class PersonLocationDetectionThread(QtCore.QThread):
         self.projection_area_coordinates = projection_area_coordinates
         self.projection_area_resolution = projection_area_resolution
         self.is_running = False
-        self.camera_frames_to_process = queue.Queue(constants.CAMERA_FRAMES_TO_PROCESS_MAX_NUMBER)
+        self.camera_frames_to_process = queue.Queue(1)
         self.detection_model = None
         self.perspective_transformation_matrix = None
         self.projection_area_polygon = None
