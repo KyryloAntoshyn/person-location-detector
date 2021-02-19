@@ -1,6 +1,5 @@
 import sys
 import application_resources
-import constants
 import widgets
 from PyQt5 import QtWidgets, QtGui
 
@@ -11,8 +10,8 @@ def main():
     """
     application = QtWidgets.QApplication(sys.argv)
 
-    QtGui.QFontDatabase.addApplicationFont(constants.APPLICATION_FONT_RESOURCE)
-    application.setFont(QtGui.QFont(constants.APPLICATION_FONT_FAMILY_NAME, constants.APPLICATION_FONT_SIZE))
+    QtGui.QFontDatabase.addApplicationFont(":/fonts/roboto_regular")
+    application.setFont(QtGui.QFont("Roboto", 14))
 
     main_window = widgets.MainWindow()
     main_window.show()
