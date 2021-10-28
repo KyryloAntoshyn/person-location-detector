@@ -28,5 +28,3 @@ pip-log.txt
 
 # Mr Developer
 .mr.developer.cfg
-
-person_location_detector/detection_models/
