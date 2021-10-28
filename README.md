@@ -3,7 +3,7 @@ This is desktop application for real-time person location detection. This applic
 
 # Steps to run the application on NVIDIA Jetson Nano
 You need to perform following steps in order to run the application on NVIDIA Jetson Nano:
-1. Clone the repository: `git clone ssh://git@gitlab.itd.pub:55522/digitalmoo/person-location-detector.git`
+1. Clone the repository: `git clone https://github.com/KyryloAntoshyn/person-location-detector.git`
 2. Go to the repository directory: `cd person-location-detector/`
 3. Remove OpenCV that is installed with JetPack SDK: `sudo apt-get purge -y libopencv*`
 4. Change *DEFAULT_VERSION* variable value inside OpenCV installation script to the OpenCV version you want to use: `nano installation/build_and_install_opencv.sh`
