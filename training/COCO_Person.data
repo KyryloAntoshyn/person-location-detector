@@ -1,0 +1,5 @@
+classes = 1
+train = data/COCO_Person_training.txt
+valid = data/COCO_Person_validation.txt
+names = data/COCO_Person.names
+backup = weights/backup/COCO_Person
